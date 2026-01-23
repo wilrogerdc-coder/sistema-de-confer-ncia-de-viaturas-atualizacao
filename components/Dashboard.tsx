@@ -99,15 +99,6 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
     };
   }, [currentProntidao]);
 
-  // Filtra avisos: mostra todos que estão ATIVOS.
-  // Avisos são fixos (manuais), controlados apenas pelo status ativo/inativo.
-  const activeNotices = notices
-    .filter(n => n.active)
-    .sort((a,b) => {
-      const prioOrder = { 'URGENTE': 3, 'ALTA': 2, 'NORMAL': 1 };
-      return (prioOrder[b.priority as keyof typeof prioOrder] || 0) - (prioOrder[a.priority as keyof typeof prioOrder] || 0);
-    });
-
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
       {/* Header com Status do Plantão */}
@@ -225,7 +216,7 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
           </div>
         </div>
 
-        {/* Coluna Direita: Pendências e Avisos */}
+        {/* Coluna Direita: Pendências */}
         <div className="space-y-6">
           <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-200 flex flex-col min-h-[400px]">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-100">
@@ -264,42 +255,6 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
                 ))
               )}
             </div>
-          </div>
-
-          {/* NOVO: CARD DE AVISOS (MURAL) */}
-          <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-xl relative overflow-hidden">
-             <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl -mr-10 -mt-10"></div>
-             <div className="flex items-center gap-3 mb-6 relative z-10">
-                <span className="text-2xl">📌</span>
-                <div>
-                   <h3 className="text-lg font-black tracking-tight">Mural de Avisos</h3>
-                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Informações Importantes</p>
-                </div>
-             </div>
-             
-             <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar-dark relative z-10">
-                {activeNotices.length === 0 ? (
-                   <p className="text-center text-xs font-medium text-slate-500 py-4 italic">Nenhum aviso no momento.</p>
-                ) : (
-                  activeNotices.map(n => (
-                    <div key={n.id} className="bg-white/5 p-4 rounded-2xl border border-white/10 hover:bg-white/10 transition-colors">
-                       <div className="flex justify-between items-center mb-1">
-                          <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded ${
-                             n.priority === 'URGENTE' ? 'bg-red-500 text-white' : 
-                             n.priority === 'ALTA' ? 'bg-orange-500 text-white' : 
-                             'bg-blue-500 text-white'
-                          }`}>{n.priority}</span>
-                          {/* Data removida visualmente para reforçar conceito de aviso fixo */}
-                       </div>
-                       <h4 className="text-sm font-bold leading-tight mb-1">{n.title}</h4>
-                       <p className="text-xs text-slate-300 leading-relaxed">{n.content}</p>
-                       <div className="mt-2 text-[8px] text-slate-500 text-right">
-                         {new Date(n.createdAt).toLocaleDateString('pt-BR')}
-                       </div>
-                    </div>
-                  ))
-                )}
-             </div>
           </div>
         </div>
       </div>
