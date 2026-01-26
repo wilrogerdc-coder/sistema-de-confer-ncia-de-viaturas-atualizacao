@@ -6,7 +6,6 @@ const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbzBMjhU8e0wHEZE
 
 // --- CONFIGURAÇÃO DE URLS ---
 // Cole abaixo a URL gerada na nova planilha de Auditoria/Logs entre as aspas.
-// Se preenchida, esta URL terá prioridade absoluta para logs.
 const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbxXmKSgtwU70pxm2AkhSVZS31N0Zd6UAObeA0G2U9Zx8V_lsu8UIZruyrucvA3niR2Mjw/exec'; 
 
 const STORAGE_KEY_CACHE = 'vtr_system_cache_v1.7';
@@ -40,12 +39,7 @@ const getDbConfig = () => {
     const stored = localStorage.getItem(STORAGE_KEY_CONFIG);
     if (stored) {
         const parsed = JSON.parse(stored);
-        
-        // Banco Operacional: Prioriza LocalStorage (Configuração da Tela) > Padrão do Código
         config.operationalUrl = parsed.operationalUrl || DEFAULT_API_URL;
-        
-        // Banco Auditoria: Prioriza Padrão do Código (se preenchido) > LocalStorage > Banco Operacional
-        // Isso garante a "URL Fixa" se o desenvolvedor definir a constante acima.
         config.auditUrl = DEFAULT_AUDIT_URL || parsed.auditUrl || config.operationalUrl;
     }
   } catch (e) {
@@ -56,17 +50,14 @@ const getDbConfig = () => {
 };
 
 export const DataService = {
-  // Retorna as configurações atuais
   getConfig() {
     return getDbConfig();
   },
 
-  // Salva novas configurações
   saveConfig(operationalUrl: string, auditUrl: string) {
     localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify({ operationalUrl, auditUrl }));
   },
 
-  // Teste de conexão genérico ou específico
   async testConnection(specificUrl?: string): Promise<{ success: boolean; latency?: number; error?: string }> {
     const urlToTest = specificUrl || getDbConfig().operationalUrl;
     const start = Date.now();
@@ -79,7 +70,7 @@ export const DataService = {
       
       if (!response.ok) return { success: false, error: `Erro HTTP ${response.status}` };
       
-      await response.json(); // Consome o corpo para garantir
+      await response.json(); 
       return { success: true, latency: Date.now() - start };
     } catch (e: any) {
       return { success: false, error: 'Falha ao acessar API Google Script.' };
@@ -102,13 +93,6 @@ export const DataService = {
 
     pendingFetch = (async () => {
       try {
-        if (!forceRefresh) {
-            const cache = localStorage.getItem(STORAGE_KEY_CACHE);
-            if (cache) {
-                // Cache logic... (poderia retornar cache aqui se implementado validade)
-            }
-        }
-
         const response = await fetch(`${operationalUrl}?t=${Date.now()}`, { 
           method: 'GET', 
           cache: 'no-store',
@@ -121,7 +105,6 @@ export const DataService = {
         }
         return data;
       } catch (e) {
-        console.warn("Usando cache local devido a erro de rede:", e);
         const cache = localStorage.getItem(STORAGE_KEY_CACHE);
         return cache ? JSON.parse(cache) : null;
       } finally {
@@ -134,19 +117,19 @@ export const DataService = {
 
   async sendToCloud(type: DataType, action: 'SAVE' | 'DELETE', payload: any): Promise<void> {
     const { operationalUrl, auditUrl } = getDbConfig();
-    // Direciona LOGs para a URL de Auditoria, todo o resto para Operacional
     const targetUrl = type === 'LOG' ? auditUrl : operationalUrl;
 
     try {
       const body = JSON.stringify({ type, action, ...payload });
+      // Para no-cors com Google Scripts, não enviamos headers de Content-Type personalizados
+      // Isso evita falhas de preflight e garante que o corpo chegue ao Script
       await fetch(targetUrl, {
         method: 'POST',
         mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
         body: body
       });
       
-      const waitTime = action === 'DELETE' ? 3000 : 2000;
+      const waitTime = action === 'DELETE' ? 2500 : 1500;
       await new Promise(resolve => setTimeout(resolve, waitTime));
     } catch (e) {
       console.error(`Erro ao sincronizar ${type}:`, e);
@@ -166,21 +149,17 @@ export const DataService = {
   async getLogs(): Promise<LogEntry[]> {
     const { operationalUrl, auditUrl } = getDbConfig();
     
-    // Função auxiliar para processar o retorno, garantindo array
     const processLogData = (data: any) => {
         if (!data) return [];
-        // Verifica variações de nome da chave e garante o parse do JSON stringificado se necessário
         const rawLogs = data.logs || data.log || data.LOGS;
         return ensureParsed(rawLogs, []);
     };
 
-    // Se as URLs forem iguais, os logs vêm junto com o fetchAllData (comportamento legado)
     if (operationalUrl === auditUrl) {
         const data = await this.fetchAllData();
         return processLogData(data);
     }
 
-    // Se forem diferentes, faz fetch específico no endpoint de auditoria
     try {
         const response = await fetch(`${auditUrl}?type=LOGS&t=${Date.now()}`, { 
             method: 'GET', 
@@ -226,7 +205,6 @@ export const DataService = {
     if (cloudVtrs.length === 0) return INITIAL_VIATURAS;
 
     const allVtrs = [...INITIAL_VIATURAS];
-    
     const processedCloudVtrs = cloudVtrs.map((v: any) => ({
       ...v,
       items: ensureParsed(v.items, []),
@@ -235,11 +213,8 @@ export const DataService = {
 
     processedCloudVtrs.forEach((cv: Viatura) => {
       const idx = allVtrs.findIndex(v => v.id === cv.id);
-      if (idx > -1) {
-        allVtrs[idx] = cv; 
-      } else {
-        allVtrs.push(cv); 
-      }
+      if (idx > -1) allVtrs[idx] = cv; 
+      else allVtrs.push(cv); 
     });
     return allVtrs;
   },
@@ -249,7 +224,6 @@ export const DataService = {
   async getChecks(): Promise<InventoryCheck[]> {
     const data = await this.fetchAllData();
     const rawChecks = data?.checks || [];
-    
     return rawChecks.map((c: any) => ({
       ...c,
       entries: ensureParsed(c.entries, []),
@@ -275,13 +249,9 @@ export const DataService = {
     }));
 
     const finalUsers = [...processedUsers];
-    
     masterUsers.forEach(m => {
-      if (!finalUsers.some(u => u.username === m.username)) {
-        finalUsers.push(m);
-      }
+      if (!finalUsers.some(u => u.username === m.username)) finalUsers.push(m);
     });
-
     return finalUsers;
   },
   async saveUser(user: User) { 
@@ -295,16 +265,11 @@ export const DataService = {
   async getSettings(): Promise<SystemSettings> {
     const data = await this.fetchAllData();
     const loadedSettings = data?.settings;
-    
     const parsed = ensureParsed(loadedSettings, { rolePermissions: DEFAULT_ROLE_PERMISSIONS });
     
     if (parsed[UserRole.USER] && !parsed.rolePermissions) {
-        return {
-            rolePermissions: parsed,
-            activeTheme: DEFAULT_THEME
-        };
+        return { rolePermissions: parsed, activeTheme: DEFAULT_THEME };
     }
-
     return {
         rolePermissions: parsed.rolePermissions || DEFAULT_ROLE_PERMISSIONS,
         activeTheme: parsed.activeTheme || DEFAULT_THEME
@@ -315,35 +280,14 @@ export const DataService = {
     await this.sendToCloud('SETTINGS', 'SAVE', settings);
   },
 
-  // --- MÉTODOS DE AVISOS (NOTICES) ---
   async getNotices(): Promise<Notice[]> {
     const data = await this.fetchAllData();
     const rawNotices = data?.notices || data?.notice || data?.NOTICES || [];
-    
-    return rawNotices.map((n: any) => {
-      // Limpeza robusta da data de validade
-      let cleanExpirationDate = undefined;
-      if (n.expirationDate) {
-        // Pega apenas os primeiros 10 chars (YYYY-MM-DD) independente do que vier depois
-        const strVal = String(n.expirationDate).trim();
-        if (strVal.length >= 10) {
-          cleanExpirationDate = strVal.substring(0, 10);
-        }
-      }
-
-      // Lógica de "Active": Padrão TRUE se undefined/null, senão processa string/bool
-      let isActive = true;
-      if (n.active !== undefined && n.active !== null) {
-        isActive = typeof n.active === 'string' ? n.active.toLowerCase() === 'true' : !!n.active;
-      }
-
-      return {
-        ...n,
-        active: isActive,
-        priority: ['NORMAL', 'ALTA', 'URGENTE'].includes(n.priority) ? n.priority : 'NORMAL',
-        expirationDate: cleanExpirationDate
-      };
-    });
+    return rawNotices.map((n: any) => ({
+      ...n,
+      active: n.active !== undefined ? (typeof n.active === 'string' ? n.active === 'true' : !!n.active) : true,
+      priority: n.priority || 'NORMAL'
+    }));
   },
 
   async saveNotice(notice: Notice): Promise<void> {
