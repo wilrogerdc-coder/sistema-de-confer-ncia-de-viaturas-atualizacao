@@ -106,7 +106,7 @@ const DatabaseManager: React.FC<DatabaseManagerProps> = ({ currentUser, viaturas
       userId: currentUser.id,
       userName: currentUser.name,
       action: 'UPDATE_DB_CONFIG',
-      details: `Configuração de URLs atualizada.`
+      details: `Configuração de URLs atualizada. OPS: ${operationalUrl.substring(0, 30)}... AUDIT: ${auditUrl.substring(0, 30)}...`
     });
 
     setConfigChanged(false);
