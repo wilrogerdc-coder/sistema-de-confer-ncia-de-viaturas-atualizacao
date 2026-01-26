@@ -68,7 +68,7 @@ export const DataService = {
       
       if (!response.ok) return { success: false, error: `Erro HTTP ${response.status}` };
       
-      await response.json(); 
+      const data = await response.json(); 
       return { success: true, latency: Date.now() - start };
     } catch (e: any) {
       return { success: false, error: 'Falha ao acessar API Google Script.' };
@@ -119,8 +119,8 @@ export const DataService = {
 
     try {
       const body = JSON.stringify({ type, action, ...payload });
-      // Para Google Scripts no-cors, o corpo deve ser enviado como string simples
-      // O script recebe isso no e.postData.contents
+      // Para Google Scripts no-cors, não usamos Content-Type application/json. 
+      // O script recebe o body no e.postData.contents
       await fetch(targetUrl, {
         method: 'POST',
         mode: 'no-cors',
@@ -149,7 +149,8 @@ export const DataService = {
     
     const processLogData = (data: any) => {
         if (!data) return [];
-        const rawLogs = data.logs || data.log || data.LOGS;
+        // Tenta encontrar logs em diferentes propriedades possíveis (mapeadas no Apps Script)
+        const rawLogs = data.logs || data.log || data.LOGS || data.auditoria || [];
         return ensureParsed(rawLogs, []);
     };
 
@@ -158,6 +159,7 @@ export const DataService = {
         return processLogData(data);
     }
 
+    // Se URLs forem diferentes, busca especificamente do endpoint de auditoria
     try {
         const response = await fetch(`${auditUrl}?type=LOGS&t=${Date.now()}`, { 
             method: 'GET', 
