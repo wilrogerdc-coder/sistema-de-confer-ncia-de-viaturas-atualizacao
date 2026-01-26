@@ -1,298 +1,304 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
-import { DataService } from '../services/dataService';
-import { User, UserRole, Viatura, Posto, Subgrupamento, GB } from '../types';
-import { generateMaterialAuditPDF } from '../utils/pdfGenerator';
+import { Viatura, InventoryCheck, User, UserRole, GB, Subgrupamento, Posto, LogEntry, RolePermissions, SystemSettings, Notice } from '../types';
+import { INITIAL_VIATURAS, INITIAL_GBS, INITIAL_SUBS, INITIAL_POSTOS, DEFAULT_ROLE_PERMISSIONS, DEFAULT_THEME } from '../constants';
 
-interface DatabaseManagerProps {
-  currentUser: User;
-  viaturasCount: number;
-  checksCount: number;
-  usersCount: number;
-}
+const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbzBMjhU8e0wHEZE7bybb9urPEIYY7lMlod0Fn2VMaiZ_4t0Z_b7Ifm0RPz4MqS_gOGafA/exec';
 
-const DatabaseManager: React.FC<DatabaseManagerProps> = ({ currentUser, viaturasCount, checksCount, usersCount }) => {
-  const [testStatus, setTestStatus] = useState<{ loading: boolean; success?: boolean; latency?: number; error?: string }>({ loading: false });
-  const [clearLoading, setClearLoading] = useState(false);
-  const [backupLoading, setBackupLoading] = useState(false);
-  
-  const [operationalUrl, setOperationalUrl] = useState('');
-  const [auditUrl, setAuditUrl] = useState('');
-  const [configChanged, setConfigChanged] = useState(false);
-  const [auditTestStatus, setAuditTestStatus] = useState<{ loading: boolean; success?: boolean; error?: string } | null>(null);
+// --- CONFIGURAÇÃO DE URLS ---
+const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbxXmKSgtwU70pxm2AkhSVZS31N0Zd6UAObeA0G2U9Zx8V_lsu8UIZruyrucvA3niR2Mjw/exec'; 
 
-  const [searchTerm, setSearchTerm] = useState('');
-  const [viaturas, setViaturas] = useState<Viatura[]>([]);
-  const [postos, setPostos] = useState<Posto[]>([]);
-  const [subs, setSubs] = useState<Subgrupamento[]>([]);
-  const [gbs, setGbs] = useState<GB[]>([]);
-  const [isLoadingAudit, setIsLoadingAudit] = useState(false);
-  const [auditLoaded, setAuditLoaded] = useState(false);
+const STORAGE_KEY_CACHE = 'vtr_system_cache_v1.7';
+const STORAGE_KEY_CONFIG = 'vtr_db_config_v1';
 
-  useEffect(() => {
-    const config = DataService.getConfig();
-    setOperationalUrl(config.operationalUrl);
-    setAuditUrl(config.auditUrl);
-  }, []);
+type DataType = 'GB' | 'SUB' | 'POSTO' | 'VIATURA' | 'CHECK' | 'USER' | 'SETUP' | 'CLEAR_ALL' | 'LOG' | 'SETTINGS' | 'NOTICE';
 
-  const loadAuditData = async () => {
-    setIsLoadingAudit(true);
+let pendingFetch: Promise<any> | null = null;
+
+const ensureParsed = (val: any, fallback: any = []) => {
+  if (typeof val === 'string') {
     try {
-      const [vtrs, p, s, g] = await Promise.all([
-        DataService.getViaturas(),
-        DataService.getPostos(),
-        DataService.getSubs(),
-        DataService.getGBS()
-      ]);
-      setViaturas(vtrs);
-      setPostos(p);
-      setSubs(s);
-      setGbs(g);
-      setAuditLoaded(true);
+      if (val.trim() === '' || val === 'undefined') return fallback;
+      return JSON.parse(val);
     } catch (e) {
-      alert("Erro ao sincronizar dados da nuvem.");
-    } finally {
-      setIsLoadingAudit(false);
+      console.warn('Falha ao parsear valor JSON:', val);
+      return fallback;
     }
-  };
-
-  const auditResults = useMemo(() => {
-    if (!searchTerm.trim() || viaturas.length === 0) return [];
-    const results: any[] = [];
-    const lowerSearch = searchTerm.toLowerCase();
-
-    viaturas.forEach(vtr => {
-      vtr.items.forEach(item => {
-        if (item.name.toLowerCase().includes(lowerSearch) || item.specification.toLowerCase().includes(lowerSearch)) {
-          const posto = postos.find(p => p.id === vtr.postoId);
-          const sub = subs.find(s => s.id === posto?.subId);
-          const gb = gbs.find(g => g.id === sub?.gbId);
-
-          results.push({
-            id: `${vtr.id}-${item.id}`,
-            name: item.name,
-            spec: item.specification,
-            qty: item.quantity,
-            vtrPrefix: vtr.prefix,
-            compartment: item.compartment,
-            posto: posto?.name || 'Não vinculado',
-            sgb: sub?.name || '-',
-            gb: gb?.name || '-'
-          });
-        }
-      });
-    });
-    return results;
-  }, [searchTerm, viaturas, postos, subs, gbs]);
-
-  const auditStats = useMemo(() => {
-    const totalQty = auditResults.reduce((acc, curr) => acc + (curr.qty || 0), 0);
-    const uniqueVtrs = new Set(auditResults.map(r => r.vtrPrefix)).size;
-    return { totalQty, uniqueVtrs };
-  }, [auditResults]);
-
-  const handleTestConnection = async (type: 'OPS' | 'AUDIT') => {
-    if (type === 'OPS') {
-        setTestStatus({ loading: true });
-        const result = await DataService.testConnection(operationalUrl);
-        setTestStatus({ loading: false, success: result.success, latency: result.latency, error: result.error });
-    } else {
-        setAuditTestStatus({ loading: true });
-        const result = await DataService.testConnection(auditUrl);
-        setAuditTestStatus({ loading: false, success: result.success, error: result.error });
-    }
-  };
-
-  const handleSaveConfig = async () => {
-    if (!operationalUrl) {
-        alert("A URL do Banco Operacional é obrigatória.");
-        return;
-    }
-    DataService.saveConfig(operationalUrl, auditUrl || operationalUrl);
-    
-    await DataService.saveLog({
-      userId: currentUser.id,
-      userName: currentUser.name,
-      action: 'UPDATE_DB_CONFIG',
-      details: `Configuração de URLs atualizada. OPS: ${operationalUrl.substring(0, 30)}... AUDIT: ${auditUrl.substring(0, 30)}...`
-    });
-
-    setConfigChanged(false);
-    alert("Configurações de conexão salvas com sucesso!");
-    window.location.reload(); 
-  };
-
-  const handleBackupData = async () => {
-    setBackupLoading(true);
-    try {
-        const data = await DataService.fetchAllData(true);
-        const fileName = `Backup_Completo_${new Date().toISOString().split('T')[0]}.json`;
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = fileName;
-        link.click();
-    } catch (e) {
-        alert("Erro ao gerar backup.");
-    } finally {
-        setBackupLoading(false);
-    }
-  };
-
-  const handleClearDatabase = async () => {
-    const confirmation = prompt("⚠️ PERIGO: ISSO APAGARÁ TODOS OS DADOS!\n\nPara confirmar, digite 'DELETAR TUDO' abaixo:");
-    if (confirmation?.trim().toUpperCase() !== 'DELETAR TUDO') return;
-    
-    setClearLoading(true);
-    try {
-      await DataService.clearDatabase();
-      await DataService.saveLog({
-        userId: currentUser.id,
-        userName: currentUser.name,
-        action: 'FORMAT_DB',
-        details: 'O usuário realizou a formatação completa do banco de dados na nuvem.'
-      });
-      alert("Banco de dados resetado!");
-      window.location.reload();
-    } catch (e) {
-      alert("Erro ao tentar limpar o banco.");
-    } finally {
-      setClearLoading(false);
-    }
-  };
-
-  if (currentUser.role !== UserRole.SUPER) {
-    return (
-      <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 shadow-sm mt-8">
-        <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Acesso Restrito</h3>
-      </div>
-    );
   }
-
-  return (
-    <div className="space-y-8 animate-in fade-in duration-500 pb-20">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden flex flex-col justify-between">
-            <div className="relative z-10">
-                <div className="flex items-center gap-4 mb-4">
-                    <span className="text-4xl">📡</span>
-                    <div>
-                        <h2 className="text-2xl font-black tracking-tighter">Data Center</h2>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Painel de Controle Cloud</p>
-                    </div>
-                </div>
-                <div className="grid grid-cols-3 gap-4 mt-6">
-                    <div className="bg-white/10 rounded-2xl p-3 border border-white/10">
-                        <p className="text-[10px] uppercase text-slate-400 font-bold">Viaturas</p>
-                        <p className="text-2xl font-black">{viaturasCount}</p>
-                    </div>
-                    <div className="bg-white/10 rounded-2xl p-3 border border-white/10">
-                        <p className="text-[10px] uppercase text-slate-400 font-bold">Checklists</p>
-                        <p className="text-2xl font-black">{checksCount}</p>
-                    </div>
-                    <div className="bg-white/10 rounded-2xl p-3 border border-white/10">
-                        <p className="text-[10px] uppercase text-slate-400 font-bold">Usuários</p>
-                        <p className="text-2xl font-black">{usersCount}</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col justify-between">
-            <div>
-                <h3 className="text-lg font-black text-slate-800 uppercase mb-1">Status da API</h3>
-            </div>
-            <div className="flex flex-col items-center justify-center py-6">
-                {testStatus.loading ? (
-                    <div className="w-12 h-12 border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin"></div>
-                ) : testStatus.success ? (
-                    <div className="text-center">
-                        <div className="text-4xl mb-2">🟢</div>
-                        <p className="text-2xl font-black text-slate-800">{testStatus.latency}ms</p>
-                    </div>
-                ) : (
-                    <div className="text-center opacity-40">
-                        <div className="text-4xl mb-2">⚪</div>
-                    </div>
-                )}
-            </div>
-            <button onClick={() => handleTestConnection('OPS')} disabled={testStatus.loading} className="w-full py-3 bg-slate-100 text-slate-700 rounded-xl font-black text-xs uppercase">
-                {testStatus.loading ? 'Pingando...' : 'Testar Conexão'}
-            </button>
-        </div>
-      </div>
-
-      <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-6">
-         <div className="border-b border-slate-100 pb-4 mb-4">
-            <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">🔗 Parametrização de Bancos de Dados</h3>
-         </div>
-
-         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="space-y-4">
-               <label className="text-[10px] font-black uppercase text-blue-600 tracking-widest">Banco Operacional</label>
-               <div className="flex gap-2">
-                  <input type="text" value={operationalUrl} onChange={e => { setOperationalUrl(e.target.value); setConfigChanged(true); }} className="flex-1 px-4 py-3 rounded-xl border border-slate-200 text-xs font-mono outline-none" />
-                  <button onClick={() => handleTestConnection('OPS')} className="px-4 bg-slate-100 rounded-xl">⚡</button>
-               </div>
-            </div>
-            <div className="space-y-4">
-               <label className="text-[10px] font-black uppercase text-purple-600 tracking-widest">Banco de Auditoria</label>
-               <div className="flex gap-2">
-                  <input type="text" value={auditUrl} onChange={e => { setAuditUrl(e.target.value); setConfigChanged(true); }} className="flex-1 px-4 py-3 rounded-xl border border-slate-200 text-xs font-mono outline-none" />
-                  <button onClick={() => handleTestConnection('AUDIT')} className="px-4 bg-slate-100 rounded-xl">⚡</button>
-               </div>
-            </div>
-         </div>
-
-         {configChanged && (
-            <div className="flex justify-end pt-4">
-               <button onClick={handleSaveConfig} className="bg-green-600 text-white px-8 py-3 rounded-xl font-black uppercase text-xs">Salvar Configurações</button>
-            </div>
-         )}
-      </div>
-
-      <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden p-8">
-         <h3 className="text-xl font-black text-slate-800 uppercase mb-4">🔎 Auditoria de Materiais</h3>
-         <div className="flex gap-4 mb-6">
-            <input type="text" placeholder="Pesquisar material..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="flex-1 px-4 py-3 rounded-xl border border-slate-200 font-bold outline-none" />
-            {!auditLoaded && <button onClick={loadAuditData} className="bg-blue-600 text-white px-6 py-2 rounded-xl font-black uppercase text-xs">Carregar Dados</button>}
-         </div>
-         {auditResults.length > 0 && (
-            <div className="overflow-x-auto rounded-xl border border-slate-100">
-               <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 border-b">
-                     <tr>
-                        <th className="px-4 py-2 font-black uppercase text-slate-400">Material</th>
-                        <th className="px-4 py-2 font-black uppercase text-slate-400 text-center">Qtd</th>
-                        <th className="px-4 py-2 font-black uppercase text-slate-400">Local</th>
-                     </tr>
-                  </thead>
-                  <tbody>
-                     {auditResults.map(res => (
-                        <tr key={res.id} className="border-b last:border-0">
-                           <td className="px-4 py-3 font-bold">{res.name}</td>
-                           <td className="px-4 py-3 text-center font-black">{res.qty}</td>
-                           <td className="px-4 py-3 text-slate-500 font-medium">{res.vtrPrefix} ({res.posto})</td>
-                        </tr>
-                     ))}
-                  </tbody>
-               </table>
-            </div>
-         )}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-           <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-4">
-               <h4 className="text-lg font-black text-slate-800 uppercase">Backup Local</h4>
-               <button onClick={handleBackupData} disabled={backupLoading} className="w-full py-4 bg-slate-800 text-white rounded-xl font-black text-xs uppercase">Baixar Backup (.JSON)</button>
-           </div>
-           <div className="bg-red-50 p-8 rounded-[2.5rem] border border-red-100 space-y-4">
-               <h4 className="text-lg font-black text-red-800 uppercase">Zona de Perigo</h4>
-               <button onClick={handleClearDatabase} disabled={clearLoading} className="w-full py-4 bg-red-600 text-white rounded-xl font-black text-xs uppercase">⚠️ FORMATAR BANCO DE DADOS</button>
-           </div>
-      </div>
-    </div>
-  );
+  return val || fallback;
 };
 
-export default DatabaseManager;
+const getDbConfig = () => {
+  let config = {
+    operationalUrl: DEFAULT_API_URL,
+    auditUrl: DEFAULT_AUDIT_URL || DEFAULT_API_URL
+  };
+
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY_CONFIG);
+    if (stored) {
+        const parsed = JSON.parse(stored);
+        config.operationalUrl = parsed.operationalUrl || DEFAULT_API_URL;
+        config.auditUrl = parsed.auditUrl || DEFAULT_AUDIT_URL || config.operationalUrl;
+    }
+  } catch (e) {
+    console.error("Erro ao ler config de DB", e);
+  }
+  
+  return config;
+};
+
+export const DataService = {
+  getConfig() {
+    return getDbConfig();
+  },
+
+  saveConfig(operationalUrl: string, auditUrl: string) {
+    localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify({ operationalUrl, auditUrl }));
+  },
+
+  async testConnection(specificUrl?: string): Promise<{ success: boolean; latency?: number; error?: string }> {
+    const urlToTest = specificUrl || getDbConfig().operationalUrl;
+    const start = Date.now();
+    try {
+      // Usamos cache: no-store para garantir que o teste seja real
+      const response = await fetch(`${urlToTest}${urlToTest.includes('?') ? '&' : '?'}t=${Date.now()}`, { 
+        method: 'GET', 
+        cache: 'no-store',
+        mode: 'cors'
+      });
+      
+      if (!response.ok) return { success: false, error: `Erro HTTP ${response.status}` };
+      
+      await response.json(); 
+      return { success: true, latency: Date.now() - start };
+    } catch (e: any) {
+      return { success: false, error: 'Falha ao acessar API Google Script. Verifique se as permissões de CORS estão habilitadas ou se a URL é válida.' };
+    }
+  },
+
+  async setupSpreadsheet(): Promise<void> {
+    await this.sendToCloud('SETUP', 'SAVE', { setup: true });
+  },
+
+  async clearDatabase(): Promise<void> {
+    await this.sendToCloud('CLEAR_ALL', 'DELETE', { confirm: true });
+    localStorage.removeItem(STORAGE_KEY_CACHE);
+  },
+
+  async fetchAllData(forceRefresh = false): Promise<any> {
+    if (!forceRefresh && pendingFetch) return pendingFetch;
+
+    const { operationalUrl } = getDbConfig();
+
+    pendingFetch = (async () => {
+      try {
+        const response = await fetch(`${operationalUrl}${operationalUrl.includes('?') ? '&' : '?'}t=${Date.now()}`, { 
+          method: 'GET', 
+          cache: 'no-store',
+          mode: 'cors'
+        });
+        if (!response.ok) throw new Error('Falha na rede');
+        const data = await response.json();
+        if (data) {
+          localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(data));
+        }
+        return data;
+      } catch (e) {
+        const cache = localStorage.getItem(STORAGE_KEY_CACHE);
+        return cache ? JSON.parse(cache) : null;
+      } finally {
+        pendingFetch = null;
+      }
+    })();
+
+    return pendingFetch;
+  },
+
+  async sendToCloud(type: DataType, action: 'SAVE' | 'DELETE', payload: any): Promise<void> {
+    const { operationalUrl, auditUrl } = getDbConfig();
+    const targetUrl = type === 'LOG' ? auditUrl : operationalUrl;
+
+    try {
+      const dataString = JSON.stringify({ type, action, ...payload });
+      
+      // CRÍTICO: Para Google Scripts com mode 'no-cors', enviamos como texto simples.
+      // O script recebe no parâmetro e.postData.contents e deve fazer JSON.parse().
+      await fetch(targetUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: {
+          'Content-Type': 'text/plain'
+        },
+        body: dataString
+      });
+      
+      // Pequeno delay para permitir processamento no lado do servidor
+      const waitTime = action === 'DELETE' ? 2000 : 1000;
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    } catch (e) {
+      console.error(`Erro ao sincronizar ${type}:`, e);
+      throw e;
+    }
+  },
+
+  async saveLog(log: Omit<LogEntry, 'id' | 'timestamp'>): Promise<void> {
+    const entry: LogEntry = {
+      id: Math.random().toString(36).substr(2, 9),
+      timestamp: new Date().toISOString(),
+      ...log
+    };
+    await this.sendToCloud('LOG', 'SAVE', entry);
+  },
+
+  async getLogs(): Promise<LogEntry[]> {
+    const { operationalUrl, auditUrl } = getDbConfig();
+    
+    const processLogData = (data: any) => {
+        if (!data) return [];
+        const rawLogs = data.logs || data.log || data.LOGS || data.auditoria || [];
+        return ensureParsed(rawLogs, []);
+    };
+
+    if (operationalUrl === auditUrl) {
+        const data = await this.fetchAllData();
+        return processLogData(data);
+    }
+
+    try {
+        const response = await fetch(`${auditUrl}${auditUrl.includes('?') ? '&' : '?'}type=LOGS&t=${Date.now()}`, { 
+            method: 'GET', 
+            cache: 'no-store',
+            mode: 'cors'
+        });
+        if (response.ok) {
+            const data = await response.json();
+            return processLogData(data);
+        }
+        return [];
+    } catch (e) {
+        console.warn("Erro ao buscar logs do endpoint de auditoria:", e);
+        return [];
+    }
+  },
+
+  async getGBS(): Promise<GB[]> {
+    const data = await this.fetchAllData();
+    return (data?.gbs && data.gbs.length > 0) ? data.gbs : INITIAL_GBS;
+  },
+  async saveGB(gb: GB) { await this.sendToCloud('GB', 'SAVE', gb); },
+  async deleteGB(id: string) { await this.sendToCloud('GB', 'DELETE', { id }); },
+
+  async getSubs(): Promise<Subgrupamento[]> {
+    const data = await this.fetchAllData();
+    return (data?.subs && data.subs.length > 0) ? data.subs : INITIAL_SUBS;
+  },
+  async saveSub(sub: Subgrupamento) { await this.sendToCloud('SUB', 'SAVE', sub); },
+  async deleteSub(id: string) { await this.sendToCloud('SUB', 'DELETE', { id }); },
+
+  async getPostos(): Promise<Posto[]> {
+    const data = await this.fetchAllData();
+    return (data?.postos && data.postos.length > 0) ? data.postos : INITIAL_POSTOS;
+  },
+  async savePosto(posto: Posto) { await this.sendToCloud('POSTO', 'SAVE', posto); },
+  async deletePosto(id: string) { await this.sendToCloud('POSTO', 'DELETE', { id }); },
+
+  async getViaturas(): Promise<Viatura[]> {
+    const data = await this.fetchAllData();
+    const cloudVtrs = data?.viaturas || [];
+    
+    if (cloudVtrs.length === 0) return INITIAL_VIATURAS;
+
+    const allVtrs = [...INITIAL_VIATURAS];
+    const processedCloudVtrs = cloudVtrs.map((v: any) => ({
+      ...v,
+      items: ensureParsed(v.items, []),
+      status: v.status || 'OPERANDO'
+    }));
+
+    processedCloudVtrs.forEach((cv: Viatura) => {
+      const idx = allVtrs.findIndex(v => v.id === cv.id);
+      if (idx > -1) allVtrs[idx] = cv; 
+      else allVtrs.push(cv); 
+    });
+    return allVtrs;
+  },
+  async saveViatura(viatura: Viatura) { await this.sendToCloud('VIATURA', 'SAVE', viatura); },
+  async deleteViatura(id: string) { await this.sendToCloud('VIATURA', 'DELETE', { id }); },
+
+  async getChecks(): Promise<InventoryCheck[]> {
+    const data = await this.fetchAllData();
+    const rawChecks = data?.checks || [];
+    return rawChecks.map((c: any) => ({
+      ...c,
+      entries: ensureParsed(c.entries, []),
+      responsibleNames: ensureParsed(c.responsibleNames, []),
+      headerDetails: ensureParsed(c.headerDetails, {
+        unidade: '', subgrupamento: '', pelotao: '', cidade: ''
+      })
+    }));
+  },
+  async saveCheck(check: InventoryCheck) { await this.sendToCloud('CHECK', 'SAVE', check); },
+
+  async getUsers(forceRefresh = false): Promise<User[]> {
+    const data = await this.fetchAllData(forceRefresh);
+    const masterUsers: User[] = [
+      { id: 'master-1', username: 'admin20gb', name: 'Administrador 20GB', role: UserRole.ADMIN, password: 'admin20gb', scopeLevel: 'GLOBAL' },
+      { id: 'master-2', username: 'Cavalieri', name: 'Super Usuário Cavalieri', role: UserRole.SUPER, password: 'tricolor', scopeLevel: 'GLOBAL' }
+    ];
+    
+    const cloudUsers: any[] = data?.users || [];
+    const processedUsers = cloudUsers.map(u => ({
+      ...u,
+      customPermissions: ensureParsed(u.customPermissions, [])
+    }));
+
+    const finalUsers = [...processedUsers];
+    masterUsers.forEach(m => {
+      if (!finalUsers.some(u => u.username === m.username)) finalUsers.push(m);
+    });
+    return finalUsers;
+  },
+  async saveUser(user: User) { 
+    if (['Cavalieri', 'admin20gb'].includes(user.username)) return;
+    await this.sendToCloud('USER', 'SAVE', user); 
+  },
+  async deleteUser(id: string) { 
+    await this.sendToCloud('USER', 'DELETE', { id }); 
+  },
+
+  async getSettings(): Promise<SystemSettings> {
+    const data = await this.fetchAllData();
+    const loadedSettings = data?.settings;
+    const parsed = ensureParsed(loadedSettings, { rolePermissions: DEFAULT_ROLE_PERMISSIONS });
+    
+    if (parsed[UserRole.USER] && !parsed.rolePermissions) {
+        return { rolePermissions: parsed, activeTheme: DEFAULT_THEME };
+    }
+    return {
+        rolePermissions: parsed.rolePermissions || DEFAULT_ROLE_PERMISSIONS,
+        activeTheme: parsed.activeTheme || DEFAULT_THEME
+    };
+  },
+
+  async saveSettings(settings: SystemSettings) {
+    await this.sendToCloud('SETTINGS', 'SAVE', settings);
+  },
+
+  async getNotices(): Promise<Notice[]> {
+    const data = await this.fetchAllData();
+    const rawNotices = data?.notices || data?.notice || data?.NOTICES || [];
+    return rawNotices.map((n: any) => ({
+      ...n,
+      active: n.active !== undefined ? (typeof n.active === 'string' ? n.active === 'true' : !!n.active) : true,
+      priority: n.priority || 'NORMAL'
+    }));
+  },
+
+  async saveNotice(notice: Notice): Promise<void> {
+    await this.sendToCloud('NOTICE', 'SAVE', notice);
+  },
+
+  async deleteNotice(id: string): Promise<void> {
+    await this.sendToCloud('NOTICE', 'DELETE', { id });
+  }
+};
