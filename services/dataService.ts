@@ -60,7 +60,8 @@ export const DataService = {
     const urlToTest = specificUrl || getDbConfig().operationalUrl;
     const start = Date.now();
     try {
-      const response = await fetch(`${urlToTest}?t=${Date.now()}`, { 
+      // Usamos cache: no-store para garantir que o teste seja real
+      const response = await fetch(`${urlToTest}${urlToTest.includes('?') ? '&' : '?'}t=${Date.now()}`, { 
         method: 'GET', 
         cache: 'no-store',
         mode: 'cors'
@@ -68,10 +69,10 @@ export const DataService = {
       
       if (!response.ok) return { success: false, error: `Erro HTTP ${response.status}` };
       
-      const data = await response.json(); 
+      await response.json(); 
       return { success: true, latency: Date.now() - start };
     } catch (e: any) {
-      return { success: false, error: 'Falha ao acessar API Google Script.' };
+      return { success: false, error: 'Falha ao acessar API Google Script. Verifique se as permissões de CORS estão habilitadas ou se a URL é válida.' };
     }
   },
 
@@ -91,7 +92,7 @@ export const DataService = {
 
     pendingFetch = (async () => {
       try {
-        const response = await fetch(`${operationalUrl}?t=${Date.now()}`, { 
+        const response = await fetch(`${operationalUrl}${operationalUrl.includes('?') ? '&' : '?'}t=${Date.now()}`, { 
           method: 'GET', 
           cache: 'no-store',
           mode: 'cors'
@@ -118,16 +119,21 @@ export const DataService = {
     const targetUrl = type === 'LOG' ? auditUrl : operationalUrl;
 
     try {
-      const body = JSON.stringify({ type, action, ...payload });
-      // Para Google Scripts no-cors, não usamos Content-Type application/json. 
-      // O script recebe o body no e.postData.contents
+      const dataString = JSON.stringify({ type, action, ...payload });
+      
+      // CRÍTICO: Para Google Scripts com mode 'no-cors', enviamos como texto simples.
+      // O script recebe no parâmetro e.postData.contents e deve fazer JSON.parse().
       await fetch(targetUrl, {
         method: 'POST',
         mode: 'no-cors',
-        body: body
+        headers: {
+          'Content-Type': 'text/plain'
+        },
+        body: dataString
       });
       
-      const waitTime = action === 'DELETE' ? 2500 : 1500;
+      // Pequeno delay para permitir processamento no lado do servidor
+      const waitTime = action === 'DELETE' ? 2000 : 1000;
       await new Promise(resolve => setTimeout(resolve, waitTime));
     } catch (e) {
       console.error(`Erro ao sincronizar ${type}:`, e);
@@ -149,7 +155,6 @@ export const DataService = {
     
     const processLogData = (data: any) => {
         if (!data) return [];
-        // Tenta encontrar logs em diferentes propriedades possíveis (mapeadas no Apps Script)
         const rawLogs = data.logs || data.log || data.LOGS || data.auditoria || [];
         return ensureParsed(rawLogs, []);
     };
@@ -159,9 +164,8 @@ export const DataService = {
         return processLogData(data);
     }
 
-    // Se URLs forem diferentes, busca especificamente do endpoint de auditoria
     try {
-        const response = await fetch(`${auditUrl}?type=LOGS&t=${Date.now()}`, { 
+        const response = await fetch(`${auditUrl}${auditUrl.includes('?') ? '&' : '?'}type=LOGS&t=${Date.now()}`, { 
             method: 'GET', 
             cache: 'no-store',
             mode: 'cors'
