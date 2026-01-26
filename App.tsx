@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, UserRole, Viatura, InventoryCheck, GB, Subgrupamento, Posto, LogEntry, RolePermissions, PermissionKey, Notice } from './types';
 import { DataService } from './services/dataService';
@@ -53,14 +52,13 @@ const App: React.FC = () => {
     else setIsLoading(true);
 
     try {
-      const [vtrs, chks, usrs, g, s, p, l, settings, ntc] = await Promise.all([
+      const [vtrs, chks, usrs, g, s, p, settings, ntc] = await Promise.all([
         DataService.getViaturas(),
         DataService.getChecks(),
         DataService.getUsers(),
         DataService.getGBS(),
         DataService.getSubs(),
         DataService.getPostos(),
-        DataService.getLogs(),
         DataService.getSettings(),
         DataService.getNotices()
       ]);
@@ -70,7 +68,6 @@ const App: React.FC = () => {
       setGbs(g || []);
       setSubs(s || []);
       setPostos(p || []);
-      setLogs(l || []);
       setNotices(ntc || []); 
       setRolePermissions(settings.rolePermissions || DEFAULT_ROLE_PERMISSIONS);
       
