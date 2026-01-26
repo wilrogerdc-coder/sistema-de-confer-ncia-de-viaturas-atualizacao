@@ -5,7 +5,6 @@ import { INITIAL_VIATURAS, INITIAL_GBS, INITIAL_SUBS, INITIAL_POSTOS, DEFAULT_RO
 const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbzBMjhU8e0wHEZE7bybb9urPEIYY7lMlod0Fn2VMaiZ_4t0Z_b7Ifm0RPz4MqS_gOGafA/exec';
 
 // --- CONFIGURAÇÃO DE URLS ---
-// URL de Auditoria/Logs padrão
 const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbxXmKSgtwU70pxm2AkhSVZS31N0Zd6UAObeA0G2U9Zx8V_lsu8UIZruyrucvA3niR2Mjw/exec'; 
 
 const STORAGE_KEY_CACHE = 'vtr_system_cache_v1.7';
@@ -28,7 +27,6 @@ const ensureParsed = (val: any, fallback: any = []) => {
   return val || fallback;
 };
 
-// Helper para gerenciar URLs
 const getDbConfig = () => {
   let config = {
     operationalUrl: DEFAULT_API_URL,
@@ -121,7 +119,8 @@ export const DataService = {
 
     try {
       const body = JSON.stringify({ type, action, ...payload });
-      // Para no-cors com Google Scripts, não enviamos headers de Content-Type personalizados
+      // Para Google Scripts no-cors, o corpo deve ser enviado como string simples
+      // O script recebe isso no e.postData.contents
       await fetch(targetUrl, {
         method: 'POST',
         mode: 'no-cors',
