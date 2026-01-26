@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { DataService } from '../services/dataService';
 import { User, UserRole, Viatura, Posto, Subgrupamento, GB } from '../types';
@@ -102,11 +103,12 @@ const DatabaseManager: React.FC<DatabaseManagerProps> = ({ currentUser, viaturas
     }
     DataService.saveConfig(operationalUrl, auditUrl || operationalUrl);
     
+    // Grava o log da alteração de configuração
     await DataService.saveLog({
       userId: currentUser.id,
       userName: currentUser.name,
       action: 'UPDATE_DB_CONFIG',
-      details: `Configuração de URLs atualizada. OPS: ${operationalUrl.substring(0, 30)}... AUDIT: ${auditUrl.substring(0, 30)}...`
+      details: `Configuração de URLs atualizada.`
     });
 
     setConfigChanged(false);
