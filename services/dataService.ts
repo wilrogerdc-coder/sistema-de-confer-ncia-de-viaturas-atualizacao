@@ -3,7 +3,7 @@ import { INITIAL_VIATURAS, INITIAL_GBS, INITIAL_SUBS, INITIAL_POSTOS, DEFAULT_RO
 
 const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbzBMjhU8e0wHEZE7bybb9urPEIYY7lMlod0Fn2VMaiZ_4t0Z_b7Ifm0RPz4MqS_gOGafA/exec';
 
-// --- CONFIGURAÇÃO DE URLS ---
+// --- CONFIGURAÇÃO DE URLS DE AUDITORIA ---
 const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbxXmKSgtwU70pxm2AkhSVZS31N0Zd6UAObeA0G2U9Zx8V_lsu8UIZruyrucvA3niR2Mjw/exec'; 
 
 const STORAGE_KEY_CACHE = 'vtr_system_cache_v1.7';
@@ -117,16 +117,26 @@ export const DataService = {
     const targetUrl = type === 'LOG' ? auditUrl : operationalUrl;
 
     try {
-      // Para Google Scripts no-cors, enviamos uma string bruta
-      const dataString = JSON.stringify({ type, action, ...payload });
+      // Importante: No Google Apps Script com no-cors, o body deve ser enviado
+      // como uma string pura que o doPost(e) consiga ler em e.postData.contents
+      const dataString = JSON.stringify({ 
+        type, 
+        action, 
+        ...payload,
+        clientTimestamp: new Date().toISOString()
+      });
       
       await fetch(targetUrl, {
         method: 'POST',
         mode: 'no-cors',
+        headers: {
+          'Content-Type': 'text/plain' // Compatível com no-cors e Google Scripts
+        },
         body: dataString
       });
       
-      const waitTime = action === 'DELETE' ? 2000 : 1000;
+      // Delay menor para logs para não travar a UI em operações sequenciais
+      const waitTime = type === 'LOG' ? 500 : (action === 'DELETE' ? 2000 : 1000);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     } catch (e) {
       console.error(`Erro ao sincronizar ${type}:`, e);
@@ -140,6 +150,7 @@ export const DataService = {
       timestamp: new Date().toISOString(),
       ...log
     };
+    // Chama sendToCloud com tipo 'LOG' para usar a auditUrl
     await this.sendToCloud('LOG', 'SAVE', entry);
   },
 
