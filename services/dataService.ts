@@ -1,9 +1,8 @@
+
 import { Viatura, InventoryCheck, User, UserRole, GB, Subgrupamento, Posto, LogEntry, RolePermissions, SystemSettings, Notice } from '../types';
 import { INITIAL_VIATURAS, INITIAL_GBS, INITIAL_SUBS, INITIAL_POSTOS, DEFAULT_ROLE_PERMISSIONS, DEFAULT_THEME } from '../constants';
 
 const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbzBMjhU8e0wHEZE7bybb9urPEIYY7lMlod0Fn2VMaiZ_4t0Z_b7Ifm0RPz4MqS_gOGafA/exec';
-
-// --- CONFIGURAÇÃO DE URLS DE AUDITORIA ---
 const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbxXmKSgtwU70pxm2AkhSVZS31N0Zd6UAObeA0G2U9Zx8V_lsu8UIZruyrucvA3niR2Mjw/exec'; 
 
 const STORAGE_KEY_CACHE = 'vtr_system_cache_v1.7';
@@ -31,7 +30,6 @@ const getDbConfig = () => {
     operationalUrl: DEFAULT_API_URL,
     auditUrl: DEFAULT_AUDIT_URL || DEFAULT_API_URL
   };
-
   try {
     const stored = localStorage.getItem(STORAGE_KEY_CONFIG);
     if (stored) {
@@ -42,7 +40,6 @@ const getDbConfig = () => {
   } catch (e) {
     console.error("Erro ao ler config de DB", e);
   }
-  
   return config;
 };
 
@@ -64,9 +61,7 @@ export const DataService = {
         cache: 'no-store',
         mode: 'cors'
       });
-      
       if (!response.ok) return { success: false, error: `Erro HTTP ${response.status}` };
-      
       await response.json(); 
       return { success: true, latency: Date.now() - start };
     } catch (e: any) {
@@ -85,9 +80,7 @@ export const DataService = {
 
   async fetchAllData(forceRefresh = false): Promise<any> {
     if (!forceRefresh && pendingFetch) return pendingFetch;
-
     const { operationalUrl } = getDbConfig();
-
     pendingFetch = (async () => {
       try {
         const response = await fetch(`${operationalUrl}${operationalUrl.includes('?') ? '&' : '?'}t=${Date.now()}`, { 
@@ -108,7 +101,6 @@ export const DataService = {
         pendingFetch = null;
       }
     })();
-
     return pendingFetch;
   },
 
@@ -117,26 +109,32 @@ export const DataService = {
     const targetUrl = type === 'LOG' ? auditUrl : operationalUrl;
 
     try {
-      // Importante: No Google Apps Script com no-cors, o body deve ser enviado
-      // como uma string pura que o doPost(e) consiga ler em e.postData.contents
-      const dataString = JSON.stringify({ 
-        type, 
-        action, 
-        ...payload,
-        clientTimestamp: new Date().toISOString()
-      });
+      // Mapeia para os cabeçalhos exatos da planilha se for um LOG
+      let dataToSend = { type, action, ...payload };
+      
+      if (type === 'LOG') {
+        dataToSend = {
+          ID: payload.id,
+          TIMESTAMP: payload.timestamp,
+          USER_ID: payload.userId,
+          USER_NAME: payload.userName,
+          ACTION: payload.action,
+          DETAILS: payload.details
+        };
+      }
+
+      const dataString = JSON.stringify(dataToSend);
       
       await fetch(targetUrl, {
         method: 'POST',
         mode: 'no-cors',
         headers: {
-          'Content-Type': 'text/plain' // Compatível com no-cors e Google Scripts
+          'Content-Type': 'text/plain'
         },
         body: dataString
       });
       
-      // Delay menor para logs para não travar a UI em operações sequenciais
-      const waitTime = type === 'LOG' ? 500 : (action === 'DELETE' ? 2000 : 1000);
+      const waitTime = type === 'LOG' ? 400 : (action === 'DELETE' ? 2000 : 1000);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     } catch (e) {
       console.error(`Erro ao sincronizar ${type}:`, e);
@@ -150,17 +148,24 @@ export const DataService = {
       timestamp: new Date().toISOString(),
       ...log
     };
-    // Chama sendToCloud com tipo 'LOG' para usar a auditUrl
     await this.sendToCloud('LOG', 'SAVE', entry);
   },
 
   async getLogs(): Promise<LogEntry[]> {
     const { operationalUrl, auditUrl } = getDbConfig();
-    
     const processLogData = (data: any) => {
         if (!data) return [];
         const rawLogs = data.logs || data.log || data.LOGS || data.auditoria || [];
-        return ensureParsed(rawLogs, []);
+        // Converte de volta dos cabeçalhos da planilha para o tipo LogEntry do sistema
+        const logs = ensureParsed(rawLogs, []);
+        return logs.map((l: any) => ({
+            id: l.ID || l.id,
+            timestamp: l.TIMESTAMP || l.timestamp,
+            userId: l.USER_ID || l.userId,
+            userName: l.USER_NAME || l.userName,
+            action: l.ACTION || l.action,
+            details: l.DETAILS || l.details
+        }));
     };
 
     if (operationalUrl === auditUrl) {
@@ -209,16 +214,13 @@ export const DataService = {
   async getViaturas(): Promise<Viatura[]> {
     const data = await this.fetchAllData();
     const cloudVtrs = data?.viaturas || [];
-    
     if (cloudVtrs.length === 0) return INITIAL_VIATURAS;
-
     const allVtrs = [...INITIAL_VIATURAS];
     const processedCloudVtrs = cloudVtrs.map((v: any) => ({
       ...v,
       items: ensureParsed(v.items, []),
       status: v.status || 'OPERANDO'
     }));
-
     processedCloudVtrs.forEach((cv: Viatura) => {
       const idx = allVtrs.findIndex(v => v.id === cv.id);
       if (idx > -1) allVtrs[idx] = cv; 
@@ -249,13 +251,11 @@ export const DataService = {
       { id: 'master-1', username: 'admin20gb', name: 'Administrador 20GB', role: UserRole.ADMIN, password: 'admin20gb', scopeLevel: 'GLOBAL' },
       { id: 'master-2', username: 'Cavalieri', name: 'Super Usuário Cavalieri', role: UserRole.SUPER, password: 'tricolor', scopeLevel: 'GLOBAL' }
     ];
-    
     const cloudUsers: any[] = data?.users || [];
     const processedUsers = cloudUsers.map(u => ({
       ...u,
       customPermissions: ensureParsed(u.customPermissions, [])
     }));
-
     const finalUsers = [...processedUsers];
     masterUsers.forEach(m => {
       if (!finalUsers.some(u => u.username === m.username)) finalUsers.push(m);
@@ -274,7 +274,6 @@ export const DataService = {
     const data = await this.fetchAllData();
     const loadedSettings = data?.settings;
     const parsed = ensureParsed(loadedSettings, { rolePermissions: DEFAULT_ROLE_PERMISSIONS });
-    
     if (parsed[UserRole.USER] && !parsed.rolePermissions) {
         return { rolePermissions: parsed, activeTheme: DEFAULT_THEME };
     }
