@@ -1,4 +1,3 @@
-
 import { Viatura, InventoryCheck, User, UserRole, GB, Subgrupamento, Posto, LogEntry, RolePermissions, SystemSettings, Notice } from '../types';
 import { INITIAL_VIATURAS, INITIAL_GBS, INITIAL_SUBS, INITIAL_POSTOS, DEFAULT_ROLE_PERMISSIONS, DEFAULT_THEME } from '../constants';
 
@@ -60,7 +59,6 @@ export const DataService = {
     const urlToTest = specificUrl || getDbConfig().operationalUrl;
     const start = Date.now();
     try {
-      // Usamos cache: no-store para garantir que o teste seja real
       const response = await fetch(`${urlToTest}${urlToTest.includes('?') ? '&' : '?'}t=${Date.now()}`, { 
         method: 'GET', 
         cache: 'no-store',
@@ -72,7 +70,7 @@ export const DataService = {
       await response.json(); 
       return { success: true, latency: Date.now() - start };
     } catch (e: any) {
-      return { success: false, error: 'Falha ao acessar API Google Script. Verifique se as permissões de CORS estão habilitadas ou se a URL é válida.' };
+      return { success: false, error: 'Falha ao acessar API Google Script.' };
     }
   },
 
@@ -119,20 +117,15 @@ export const DataService = {
     const targetUrl = type === 'LOG' ? auditUrl : operationalUrl;
 
     try {
+      // Para Google Scripts no-cors, enviamos uma string bruta
       const dataString = JSON.stringify({ type, action, ...payload });
       
-      // CRÍTICO: Para Google Scripts com mode 'no-cors', enviamos como texto simples.
-      // O script recebe no parâmetro e.postData.contents e deve fazer JSON.parse().
       await fetch(targetUrl, {
         method: 'POST',
         mode: 'no-cors',
-        headers: {
-          'Content-Type': 'text/plain'
-        },
         body: dataString
       });
       
-      // Pequeno delay para permitir processamento no lado do servidor
       const waitTime = action === 'DELETE' ? 2000 : 1000;
       await new Promise(resolve => setTimeout(resolve, waitTime));
     } catch (e) {
