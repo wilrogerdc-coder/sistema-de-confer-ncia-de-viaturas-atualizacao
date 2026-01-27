@@ -1,3 +1,4 @@
+
 import { InventoryCheck, Viatura, CheckEntry, ViaturaStatus, LogEntry } from '../types';
 import { formatFullDate, safeDateIso } from './calendarUtils';
 import { PRONTIDAO_CYCLE, DEFAULT_HEADER } from '../constants';
@@ -106,7 +107,7 @@ export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Vi
         return row;
     });
 
-    // Linha de Responsáveis com nomes rotacionados
+    // Linha de Responsáveis
     const respRow = ['Responsável (Conferente)'];
     for (let d = 1; d <= daysInMonth; d++) {
         const dateStr = `${monthYear}-${d.toString().padStart(2, '0')}`;
@@ -127,16 +128,22 @@ export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Vi
         headStyles: { fillColor: themeColor, fontSize: 5 },
         columnStyles: { 0: { halign: 'left', fontStyle: 'bold', cellWidth: 70 } },
         didParseCell: (data: any) => {
-            if (data.section === 'body' && data.row.index === body.length && data.column.index > 0) {
-                data.cell.styles.minCellHeight = 30; // Aumenta a altura para caber o texto rotacionado
+            // Se for a última linha (Responsáveis)
+            if (data.section === 'body' && data.row.index === body.length) {
+                if (data.column.index > 0) {
+                    data.cell.styles.minCellHeight = 35; 
+                    // Captura o nome para desenho manual e limpa o texto automático (evita duplicidade horizontal)
+                    data.cell.rawName = data.cell.text[0];
+                    data.cell.text = [];
+                }
             }
         },
         didDrawCell: (data: any) => {
+            // Desenha o nome a 90 graus na última linha
             if (data.section === 'body' && data.row.index === body.length && data.column.index > 0) {
-                const text = data.cell.text[0];
+                const text = data.cell.rawName;
                 if (text && text.trim() !== '') {
                     doc.saveGraphicsState();
-                    // Lógica para desenhar o texto verticalmente (90 graus)
                     const x = data.cell.x + (data.cell.width / 2) + 1.2;
                     const y = data.cell.y + data.cell.height - 2;
                     doc.setFontSize(4.5);
@@ -144,7 +151,6 @@ export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Vi
                     doc.setTextColor(0, 0, 0);
                     doc.text(text, x, y, { angle: 90 });
                     doc.restoreGraphicsState();
-                    data.cell.text = []; // Remove o texto original da célula para não sobrepor
                 }
             }
         },
