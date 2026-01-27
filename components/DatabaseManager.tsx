@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { DataService } from '../services/dataService';
 import { User, UserRole, Viatura, Posto, Subgrupamento, GB } from '../types';
@@ -103,7 +102,6 @@ const DatabaseManager: React.FC<DatabaseManagerProps> = ({ currentUser, viaturas
     }
     DataService.saveConfig(operationalUrl, auditUrl || operationalUrl);
     
-    // Grava o log da alteração de configuração
     await DataService.saveLog({
       userId: currentUser.id,
       userName: currentUser.name,
