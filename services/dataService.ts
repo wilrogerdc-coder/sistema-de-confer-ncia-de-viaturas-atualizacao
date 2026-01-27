@@ -1,3 +1,4 @@
+
 import { Viatura, InventoryCheck, User, UserRole, GB, Subgrupamento, Posto, LogEntry, RolePermissions, SystemSettings, Notice } from '../types';
 import { INITIAL_VIATURAS, INITIAL_GBS, INITIAL_SUBS, INITIAL_POSTOS, DEFAULT_ROLE_PERMISSIONS, DEFAULT_THEME } from '../constants';
 
@@ -110,7 +111,6 @@ export const DataService = {
     try {
       let dataToSend;
       
-      // Mapeamento rigoroso para os cabeçalhos da planilha se for um LOG
       if (type === 'LOG') {
         dataToSend = {
           ID: payload.id,
@@ -126,14 +126,13 @@ export const DataService = {
 
       const dataString = JSON.stringify(dataToSend);
       
-      // No Google Scripts com no-cors, enviamos o JSON como texto puro
       await fetch(targetUrl, {
         method: 'POST',
         mode: 'no-cors',
         body: dataString
       });
       
-      const waitTime = type === 'LOG' ? 500 : (action === 'DELETE' ? 2000 : 1000);
+      const waitTime = type === 'LOG' ? 400 : (action === 'DELETE' ? 1500 : 800);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     } catch (e) {
       console.error(`Erro ao sincronizar ${type}:`, e);
