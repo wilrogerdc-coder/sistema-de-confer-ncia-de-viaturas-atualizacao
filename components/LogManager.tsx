@@ -1,3 +1,4 @@
+
 import React, { useMemo, useState } from 'react';
 import { LogEntry, User, UserRole } from '../types';
 import { 
@@ -25,6 +26,32 @@ const LogManager: React.FC<LogManagerProps> = ({ logs: initialLogs, currentUser 
       setLogs(freshLogs);
     } catch (e) {
       alert("Falha ao conectar com o banco de auditoria.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleClearLogs = async () => {
+    if (!window.confirm("ATENÇÃO: Você está prestes a APAGAR permanentemente todo o histórico de logs do banco de auditoria. Esta ação NÃO pode ser desfeita.\n\nDeseja continuar?")) return;
+    if (!window.confirm("CONFIRMAÇÃO FINAL: Apagar todos os registros de log agora?")) return;
+
+    setIsLoading(true);
+    try {
+      await DataService.clearLogs();
+      // Tenta salvar um log da própria ação de limpeza
+      try {
+        await DataService.saveLog({
+          userId: currentUser.id,
+          userName: currentUser.name,
+          action: 'CLEAR_LOGS',
+          details: 'O banco de dados de auditoria foi resetado pelo Super Usuário.'
+        });
+      } catch(e) {}
+      
+      alert("Banco de logs limpo com sucesso.");
+      await handleRefreshLogs();
+    } catch (e) {
+      alert("Erro ao tentar limpar os logs do servidor.");
     } finally {
       setIsLoading(false);
     }
@@ -131,18 +158,19 @@ const LogManager: React.FC<LogManagerProps> = ({ logs: initialLogs, currentUser 
         </div>
         <div className="flex gap-3">
           <button 
+            onClick={handleClearLogs} 
+            disabled={isLoading}
+            className="bg-red-50 text-red-600 px-6 py-2.5 rounded-xl font-black uppercase text-[10px] shadow-sm hover:bg-red-600 hover:text-white disabled:opacity-50 transition-all border border-red-100"
+          >
+            {isLoading ? '...' : '⚠️ Limpar Logs'}
+          </button>
+          <button 
             onClick={handleRefreshLogs} 
             disabled={isLoading}
             className="bg-blue-600 text-white px-6 py-2.5 rounded-xl font-black uppercase text-xs shadow-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
           >
-            {isLoading ? 'Sincronizando...' : '🔄 Sincronizar Logs'}
+            {isLoading ? 'Sincronizando...' : '🔄 Sincronizar'}
           </button>
-          <div className="text-right hidden md:block border-l pl-4 border-slate-100">
-             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Última Atividade</p>
-             <p className="text-sm font-black text-slate-800">
-               {stats.lastLog ? stats.lastLog.toLocaleString('pt-BR') : 'Aguardando Sinc.'}
-             </p>
-          </div>
         </div>
       </div>
 
@@ -221,7 +249,7 @@ const LogManager: React.FC<LogManagerProps> = ({ logs: initialLogs, currentUser 
                <div className="flex flex-col md:flex-row items-center gap-4 w-full xl:w-auto">
                  <h4 className="text-sm font-black text-slate-800 uppercase tracking-wide whitespace-nowrap">Registro Detalhado</h4>
                  <button onClick={handleExportPDF} className="bg-slate-900 text-white px-4 py-2 rounded-xl font-bold uppercase text-[10px] hover:bg-slate-800 transition-colors shadow-lg flex items-center gap-2">
-                    <span>📥</span> Exportar Relatório (PDF)
+                    <span>📥</span> Exportar PDF
                  </button>
                </div>
                
@@ -251,7 +279,7 @@ const LogManager: React.FC<LogManagerProps> = ({ logs: initialLogs, currentUser 
                     <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Data / Hora</th>
                     <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Usuário</th>
                     <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Ação</th>
-                    <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Detalhes da Operação</th>
+                    <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Detalhes</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -301,12 +329,14 @@ const LogManager: React.FC<LogManagerProps> = ({ logs: initialLogs, currentUser 
           <div className="text-6xl mb-4 grayscale">📋</div>
           <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Logs não sincronizados</h3>
           <p className="text-slate-400 font-bold mt-2 mb-6">Clique no botão acima para carregar os dados de auditoria do banco externo.</p>
-          <button 
-            onClick={handleRefreshLogs} 
-            className="bg-slate-900 text-white px-10 py-3 rounded-2xl font-black uppercase text-xs"
-          >
-            Sincronizar Agora
-          </button>
+          <div className="flex justify-center gap-3">
+            <button 
+              onClick={handleRefreshLogs} 
+              className="bg-slate-900 text-white px-10 py-3 rounded-2xl font-black uppercase text-xs"
+            >
+              Sincronizar Agora
+            </button>
+          </div>
         </div>
       )}
     </div>
