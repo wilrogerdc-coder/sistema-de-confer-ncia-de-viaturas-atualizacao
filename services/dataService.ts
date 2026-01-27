@@ -1,9 +1,8 @@
-
 import { Viatura, InventoryCheck, User, UserRole, GB, Subgrupamento, Posto, LogEntry, RolePermissions, SystemSettings, Notice } from '../types';
 import { INITIAL_VIATURAS, INITIAL_GBS, INITIAL_SUBS, INITIAL_POSTOS, DEFAULT_ROLE_PERMISSIONS, DEFAULT_THEME } from '../constants';
 
 const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbzBMjhU8e0wHEZE7bybb9urPEIYY7lMlod0Fn2VMaiZ_4t0Z_b7Ifm0RPz4MqS_gOGafA/exec';
-const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbxXmKSgtwU70pxm2AkhSVZS31N0Zd6UAObeA0G2U9Zx8V_lsu8UIZruyrucvA3niR2Mjw/exec'; 
+const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbzrfHg2aBDIVs0SP6EBdyU5mopFHwMMLWK_wPEQg9NCSyH5ddwuRvOZNp7GsEUSmtKp/exec'; 
 
 const STORAGE_KEY_CACHE = 'vtr_system_cache_v1.7';
 const STORAGE_KEY_CONFIG = 'vtr_db_config_v1';
@@ -109,9 +108,9 @@ export const DataService = {
     const targetUrl = type === 'LOG' ? auditUrl : operationalUrl;
 
     try {
-      // Mapeia para os cabeçalhos exatos da planilha se for um LOG
-      let dataToSend = { type, action, ...payload };
+      let dataToSend;
       
+      // Mapeamento rigoroso para os cabeçalhos da planilha se for um LOG
       if (type === 'LOG') {
         dataToSend = {
           ID: payload.id,
@@ -121,20 +120,20 @@ export const DataService = {
           ACTION: payload.action,
           DETAILS: payload.details
         };
+      } else {
+        dataToSend = { type, action, ...payload };
       }
 
       const dataString = JSON.stringify(dataToSend);
       
+      // No Google Scripts com no-cors, enviamos o JSON como texto puro
       await fetch(targetUrl, {
         method: 'POST',
         mode: 'no-cors',
-        headers: {
-          'Content-Type': 'text/plain'
-        },
         body: dataString
       });
       
-      const waitTime = type === 'LOG' ? 400 : (action === 'DELETE' ? 2000 : 1000);
+      const waitTime = type === 'LOG' ? 500 : (action === 'DELETE' ? 2000 : 1000);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     } catch (e) {
       console.error(`Erro ao sincronizar ${type}:`, e);
@@ -156,7 +155,6 @@ export const DataService = {
     const processLogData = (data: any) => {
         if (!data) return [];
         const rawLogs = data.logs || data.log || data.LOGS || data.auditoria || [];
-        // Converte de volta dos cabeçalhos da planilha para o tipo LogEntry do sistema
         const logs = ensureParsed(rawLogs, []);
         return logs.map((l: any) => ({
             id: l.ID || l.id,
