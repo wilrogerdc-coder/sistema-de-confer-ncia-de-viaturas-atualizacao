@@ -2,7 +2,7 @@
 import React, { useMemo } from 'react';
 import { Viatura, InventoryCheck, ProntidaoColor, Posto, LogEntry, Notice } from '../types';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
-import { getProntidaoInfo, formatFullDate, safeDateIso } from '../utils/calendarUtils';
+import { getProntidaoInfo, formatFullDate, safeDateIso, isNoticeExpired } from '../utils/calendarUtils';
 import { DEFAULT_HEADER, PRONTIDAO_CYCLE } from '../constants';
 
 interface DashboardProps {
@@ -17,15 +17,23 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
   const currentProntidao = getProntidaoInfo(new Date());
   const postoName = postos.length > 0 ? postos[0].name : DEFAULT_HEADER.pelotao;
 
+  // Filtragem de avisos ativos e não expirados
+  const activeNotices = useMemo(() => {
+    return notices
+      .filter(n => n.active && !isNoticeExpired(n.expirationDate))
+      .sort((a, b) => {
+        const priorityMap: Record<string, number> = { 'URGENTE': 0, 'ALTA': 1, 'NORMAL': 2 };
+        return priorityMap[a.priority] - priorityMap[b.priority];
+      });
+  }, [notices]);
+
   // Statistics
   const totalViaturas = viaturas.length;
-  const totalChecks = checks.length;
   
   const today = new Date();
   today.setHours(0,0,0,0);
   const todayStr = today.toISOString().split('T')[0];
 
-  // Volume de Produção
   const checksToday = checks.filter(c => safeDateIso(c.date) === todayStr).length;
   
   const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -42,18 +50,13 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
     return cDate >= startOfWeek;
   }).length;
 
-  // Dados para o Volume de Prontidão (Gráfico) - AGORA MENSAL
   const shiftStats = PRONTIDAO_CYCLE.map(p => {
     let colorVar = '--readiness-azul';
     if (p.color === ProntidaoColor.VERDE) colorVar = '--readiness-verde';
     if (p.color === ProntidaoColor.AMARELA) colorVar = '--readiness-amarela';
-    
-    // Tenta pegar a cor computada do root, senão fallback
     const computedColor = getComputedStyle(document.documentElement).getPropertyValue(colorVar).trim() || p.hex;
-
     return {
       name: p.label,
-      // Filtra os checks DO MÊS ATUAL que correspondem à cor do plantão
       value: checksThisMonth.filter(c => c.shiftColor === p.label).length,
       color: computedColor
     };
@@ -65,39 +68,37 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
 
   const pendingOperativeViaturas = viaturas
     .filter(v => String(v.status).trim().toUpperCase() === "OPERANDO")
-    .map((v): { name: string; days: string | number; id: string } | null => {
+    .map((v) => {
       const checkedToday = checks.some(c => c.viaturaId === v.id && safeDateIso(c.date) === todayStr);
       if (checkedToday) return null;
-
       const vtrChecks = checks.filter(c => c.viaturaId === v.id);
       if (vtrChecks.length === 0) return { name: v.prefix, days: '∞', id: v.id };
-      
       const sorted = [...vtrChecks].sort((a,b) => b.date.localeCompare(a.date));
       const lastDate = new Date(safeDateIso(sorted[0].date) + 'T12:00:00');
       lastDate.setHours(0,0,0,0);
-      
       const diffTime = Math.abs(today.getTime() - lastDate.getTime());
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       return { name: v.prefix, days: diffDays, id: v.id };
-    }).filter((v): v is { name: string; days: string | number; id: string } | null => v !== null);
+    }).filter(v => v !== null);
 
-  // Calcula estilos dinâmicos baseados no tema atual
   const activeStyle = useMemo(() => {
     let varName = '--readiness-azul';
     if (currentProntidao.color === ProntidaoColor.VERDE) varName = '--readiness-verde';
     if (currentProntidao.color === ProntidaoColor.AMARELA) varName = '--readiness-amarela';
-
     return {
       headerBg: `linear-gradient(135deg, var(${varName}), color-mix(in srgb, var(${varName}), black 10%))`,
       headerShadow: `0 20px 25px -5px color-mix(in srgb, var(${varName}), white 60%)`,
-      badgeBg: `color-mix(in srgb, var(${varName}), transparent 70%)`,
-      textColor: `color-mix(in srgb, var(${varName}), black 40%)`,
-      lightBg: `color-mix(in srgb, var(${varName}), white 90%)`,
-      borderColor: `color-mix(in srgb, var(${varName}), white 50%)`,
-      pendingColor: 'var(--readiness-amarela)',
-      lateColor: 'var(--readiness-verde)' // Inverso ou vermelho padrão? Mantendo lógica anterior
+      badgeBg: `color-mix(in srgb, var(${varName}), transparent 70%)`
     };
   }, [currentProntidao]);
+
+  const getPriorityBadge = (priority: string) => {
+    switch(priority) {
+      case 'URGENTE': return 'bg-red-600 text-white animate-pulse';
+      case 'ALTA': return 'bg-orange-500 text-white';
+      default: return 'bg-blue-500 text-white';
+    }
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
@@ -139,10 +140,30 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
         </div>
       </div>
 
+      {/* Mural de Avisos Dinâmico */}
+      {activeNotices.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {activeNotices.map(notice => (
+            <div key={notice.id} className={`p-5 rounded-3xl bg-white border-2 shadow-sm relative overflow-hidden transition-all hover:shadow-md ${notice.priority === 'URGENTE' ? 'border-red-500 ring-4 ring-red-50' : 'border-slate-100'}`}>
+              <div className="flex justify-between items-start mb-3">
+                <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-widest ${getPriorityBadge(notice.priority)}`}>
+                  {notice.priority}
+                </span>
+                <span className="text-[10px] font-bold text-slate-300">📌</span>
+              </div>
+              <h4 className="font-black text-slate-800 text-sm mb-1 uppercase tracking-tight leading-tight">{notice.title}</h4>
+              <p className="text-xs text-slate-500 font-medium leading-relaxed">{notice.content}</p>
+              <div className="mt-4 pt-3 border-t border-slate-50 flex justify-between items-center">
+                <span className="text-[9px] font-black text-slate-400 uppercase">Por: {notice.createdBy.split(' ').pop()}</span>
+                <span className="text-[9px] font-bold text-slate-300">{new Date(notice.createdAt).toLocaleDateString('pt-BR')}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Coluna Esquerda: Estatísticas e Gráfico */}
         <div className="xl:col-span-2 space-y-6">
-          {/* Cards de Produção */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-between h-32 relative overflow-hidden group hover:shadow-md transition-all">
               <div className="absolute right-[-10px] top-[-10px] text-6xl opacity-5 group-hover:opacity-10 transition-opacity">📅</div>
@@ -170,7 +191,6 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
             </div>
           </div>
 
-          {/* Gráfico de Prontidão */}
           <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-200">
             <div className="flex justify-between items-center mb-6">
               <div>
@@ -216,7 +236,6 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
           </div>
         </div>
 
-        {/* Coluna Direita: Pendências */}
         <div className="space-y-6">
           <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-200 flex flex-col min-h-[400px]">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-100">
@@ -247,9 +266,6 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
                       <span className={`text-[9px] font-black px-2 py-1 rounded-lg uppercase tracking-wide ${v!.days === '∞' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'}`}>
                         {v!.days === '∞' ? 'Nunca' : `${v!.days}d atraso`}
                       </span>
-                    </div>
-                    <div className="mt-3 w-full h-1 bg-slate-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-red-500 w-1/4 animate-pulse"></div>
                     </div>
                   </div>
                 ))
