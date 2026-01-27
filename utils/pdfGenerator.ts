@@ -1,4 +1,3 @@
-
 import { InventoryCheck, Viatura, CheckEntry, ViaturaStatus, LogEntry } from '../types';
 import { formatFullDate, safeDateIso } from './calendarUtils';
 import { PRONTIDAO_CYCLE, DEFAULT_HEADER } from '../constants';
@@ -92,6 +91,7 @@ export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Vi
     const headDays = Array.from({ length: daysInMonth }, (_, i) => (i + 1).toString().padStart(2, '0'));
     const head = ['Material / Item Operacional', ...headDays];
     
+    // Corpo do Relatório
     const body = viatura.items.map(item => {
         const row = [item.name];
         for (let d = 1; d <= daysInMonth; d++) {
@@ -106,10 +106,12 @@ export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Vi
         return row;
     });
 
+    // Linha de Responsáveis com nomes rotacionados
     const respRow = ['Responsável (Conferente)'];
     for (let d = 1; d <= daysInMonth; d++) {
         const dateStr = `${monthYear}-${d.toString().padStart(2, '0')}`;
         const check = checks.find(c => c.viaturaId === viatura.id && safeDateIso(c.date) === dateStr);
+        // Pega o nome de guerra (último nome)
         const name = (check && check.responsibleNames && check.responsibleNames.length > 0) 
             ? check.responsibleNames[0].split(' ').pop()?.toUpperCase() || '' 
             : '';
@@ -125,10 +127,8 @@ export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Vi
         headStyles: { fillColor: themeColor, fontSize: 5 },
         columnStyles: { 0: { halign: 'left', fontStyle: 'bold', cellWidth: 70 } },
         didParseCell: (data: any) => {
-            if (data.section === 'body' && data.row.index === body.length) {
-                if (data.column.index > 0) {
-                    data.cell.styles.minCellHeight = 35; 
-                }
+            if (data.section === 'body' && data.row.index === body.length && data.column.index > 0) {
+                data.cell.styles.minCellHeight = 30; // Aumenta a altura para caber o texto rotacionado
             }
         },
         didDrawCell: (data: any) => {
@@ -136,6 +136,7 @@ export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Vi
                 const text = data.cell.text[0];
                 if (text && text.trim() !== '') {
                     doc.saveGraphicsState();
+                    // Lógica para desenhar o texto verticalmente (90 graus)
                     const x = data.cell.x + (data.cell.width / 2) + 1.2;
                     const y = data.cell.y + data.cell.height - 2;
                     doc.setFontSize(4.5);
@@ -143,7 +144,7 @@ export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Vi
                     doc.setTextColor(0, 0, 0);
                     doc.text(text, x, y, { angle: 90 });
                     doc.restoreGraphicsState();
-                    data.cell.text = [];
+                    data.cell.text = []; // Remove o texto original da célula para não sobrepor
                 }
             }
         },
@@ -189,7 +190,7 @@ export const generateMonthlyFulfillmentPDF = (checks: InventoryCheck[], viaturas
         }
         return row;
     });
-    (doc as any).autoTable({ startY: 20, head: [head], body: body, styles: { fontSize: 5 } });
+    (doc as any).autoTable({ startY: 20, head: [head], body: body, styles: { fontSize: 5, halign: 'center' } });
     
     if (isPreview) window.open(doc.output('bloburl'));
     else doc.save(`Mapa_Frequencia_${monthYear}.pdf`);
