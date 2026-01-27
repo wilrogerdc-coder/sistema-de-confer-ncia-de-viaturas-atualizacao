@@ -78,6 +78,22 @@ export const DataService = {
     localStorage.removeItem(STORAGE_KEY_CACHE);
   },
 
+  async clearLogs(): Promise<void> {
+    const { auditUrl } = getDbConfig();
+    try {
+      await fetch(auditUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        body: JSON.stringify({ type: 'LOG', action: 'DELETE', confirm: true })
+      });
+      // Delay para garantir que o script do Google processou a requisição assíncrona
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    } catch (e) {
+      console.error("Erro ao limpar banco de logs:", e);
+      throw e;
+    }
+  },
+
   async fetchAllData(forceRefresh = false): Promise<any> {
     if (!forceRefresh && pendingFetch) return pendingFetch;
     const { operationalUrl } = getDbConfig();
