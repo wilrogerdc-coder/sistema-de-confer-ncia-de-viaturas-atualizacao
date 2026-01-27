@@ -1,3 +1,4 @@
+
 import { InventoryCheck, Viatura, CheckEntry, ViaturaStatus, LogEntry } from '../types';
 import { formatFullDate, safeDateIso } from './calendarUtils';
 import { PRONTIDAO_CYCLE, DEFAULT_HEADER } from '../constants';
@@ -24,7 +25,7 @@ const hexToRgb = (hex: string) => {
 export const generateInventoryPDF = (check: InventoryCheck, viatura: Viatura, isPreview: boolean = false) => {
   const JsPDF = getJsPDF();
   const doc = new JsPDF();
-  const header = check.headerDetails;
+  const header = check.headerDetails || DEFAULT_HEADER;
   const shiftInfo = PRONTIDAO_CYCLE.find(p => p.label === check.shiftColor);
   const themeColor = shiftInfo ? shiftInfo.hex : '#dc2626';
   const rgb = hexToRgb(themeColor);
@@ -72,7 +73,7 @@ export const generateInventoryPDF = (check: InventoryCheck, viatura: Viatura, is
   });
 
   if (isPreview) window.open(doc.output('bloburl'));
-  else doc.save(`Checklist_${viatura.prefix}.pdf`);
+  else doc.save(`Checklist_${viatura.prefix}_${safeDateIso(check.date)}.pdf`);
 };
 
 export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Viatura, monthYear: string, isPreview: boolean = false) => {
@@ -91,7 +92,6 @@ export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Vi
     const headDays = Array.from({ length: daysInMonth }, (_, i) => (i + 1).toString().padStart(2, '0'));
     const head = ['Material / Item Operacional', ...headDays];
     
-    // Corpo: Materiais
     const body = viatura.items.map(item => {
         const row = [item.name];
         for (let d = 1; d <= daysInMonth; d++) {
@@ -106,12 +106,10 @@ export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Vi
         return row;
     });
 
-    // Linha de Responsáveis (Conferentes)
     const respRow = ['Responsável (Conferente)'];
     for (let d = 1; d <= daysInMonth; d++) {
         const dateStr = `${monthYear}-${d.toString().padStart(2, '0')}`;
         const check = checks.find(c => c.viaturaId === viatura.id && safeDateIso(c.date) === dateStr);
-        // Pegamos o primeiro nome de guerra se existir
         const name = (check && check.responsibleNames && check.responsibleNames.length > 0) 
             ? check.responsibleNames[0].split(' ').pop()?.toUpperCase() || '' 
             : '';
@@ -127,26 +125,24 @@ export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Vi
         headStyles: { fillColor: themeColor, fontSize: 5 },
         columnStyles: { 0: { halign: 'left', fontStyle: 'bold', cellWidth: 70 } },
         didParseCell: (data: any) => {
-            // Se for a última linha (Responsáveis) e não for a primeira coluna
-            if (data.row.index === body.length && data.column.index > 0) {
-                data.cell.styles.minCellHeight = 35; // Altura para o texto vertical
+            if (data.section === 'body' && data.row.index === body.length) {
+                if (data.column.index > 0) {
+                    data.cell.styles.minCellHeight = 35; 
+                }
             }
         },
         didDrawCell: (data: any) => {
-            // Lógica para rotacionar o nome a 90 graus na última linha
-            if (data.row.index === body.length && data.column.index > 0 && data.cell.raw) {
-                const text = data.cell.raw.toString();
-                if (text) {
+            if (data.section === 'body' && data.row.index === body.length && data.column.index > 0) {
+                const text = data.cell.text[0];
+                if (text && text.trim() !== '') {
                     doc.saveGraphicsState();
-                    // Posicionamento centralizado na célula
-                    const x = data.cell.x + (data.cell.width / 2);
+                    const x = data.cell.x + (data.cell.width / 2) + 1.2;
                     const y = data.cell.y + data.cell.height - 2;
                     doc.setFontSize(4.5);
                     doc.setFont('helvetica', 'bold');
                     doc.setTextColor(0, 0, 0);
                     doc.text(text, x, y, { angle: 90 });
                     doc.restoreGraphicsState();
-                    // Limpamos o texto original da célula para não sobrepor
                     data.cell.text = [];
                 }
             }
@@ -155,27 +151,31 @@ export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Vi
     });
 
     if (isPreview) window.open(doc.output('bloburl'));
-    else doc.save(`Relacao_Mensal_${viatura.prefix}.pdf`);
+    else doc.save(`Relacao_Mensal_${viatura.prefix}_${monthYear}.pdf`);
 };
 
-export const generateSummaryPDF = (checks: InventoryCheck[], viaturas: Viatura[]) => {
+export const generateSummaryPDF = (checks: InventoryCheck[], viaturas: Viatura[], isPreview: boolean = false) => {
   const JsPDF = getJsPDF();
   const doc = new JsPDF('l', 'mm', 'a4'); 
+  doc.setFont('helvetica', 'bold');
   doc.text("HISTÓRICO DE CONFERÊNCIAS", 148, 15, { align: "center" });
   const tableData = checks.map(c => [
-    formatDateShort(c.date),
+    safeDateIso(c.date),
     viaturas.find(v => v.id === c.viaturaId)?.prefix || '?',
     c.shiftColor,
     c.commanderName,
     c.entries.some(e => e.status === 'CN') ? 'COM NOVIDADES' : 'OK'
   ]);
   (doc as any).autoTable({ startY: 25, head: [['Data', 'Vtr', 'Turno', 'Cmt', 'Status']], body: tableData });
-  doc.save(`Resumo_Historico.pdf`);
+  
+  if (isPreview) window.open(doc.output('bloburl'));
+  else doc.save(`Resumo_Historico.pdf`);
 };
 
-export const generateMonthlyFulfillmentPDF = (checks: InventoryCheck[], viaturas: Viatura[], monthYear: string) => {
+export const generateMonthlyFulfillmentPDF = (checks: InventoryCheck[], viaturas: Viatura[], monthYear: string, isPreview: boolean = false) => {
     const JsPDF = getJsPDF();
     const doc = new JsPDF('l', 'mm', 'a4'); 
+    doc.setFont('helvetica', 'bold');
     doc.text(`FREQUÊNCIA MENSAL - ${monthYear}`, 148, 15, { align: "center" });
     const [year, month] = monthYear.split('-').map(Number);
     const days = new Date(year, month, 0).getDate();
@@ -190,55 +190,82 @@ export const generateMonthlyFulfillmentPDF = (checks: InventoryCheck[], viaturas
         return row;
     });
     (doc as any).autoTable({ startY: 20, head: [head], body: body, styles: { fontSize: 5 } });
-    doc.save(`Frequencia_${monthYear}.pdf`);
+    
+    if (isPreview) window.open(doc.output('bloburl'));
+    else doc.save(`Mapa_Frequencia_${monthYear}.pdf`);
 };
 
 export const generateNewsReportPDF = (checks: InventoryCheck[], viaturas: Viatura[], monthYear: string, isPreview: boolean = false) => {
     const JsPDF = getJsPDF();
     const doc = new JsPDF();
+    doc.setFont('helvetica', 'bold');
     doc.text(`CONSOLIDADO DE NOVIDADES - ${monthYear}`, 105, 15, { align: "center" });
     const news: any[] = [];
     checks.filter(c => safeDateIso(c.date).startsWith(monthYear)).forEach(c => {
         const vtr = viaturas.find(v => v.id === c.viaturaId);
         c.entries.filter(e => e.status === 'CN' || e.status === 'NA').forEach(e => {
             const item = (c.snapshot || vtr?.items || []).find(i => i.id === e.itemId);
-            news.push([formatDateShort(c.date), vtr?.prefix, item?.name, e.status, e.observation]);
+            news.push([safeDateIso(c.date), vtr?.prefix, item?.name || 'Item não encontrado', e.status, e.observation || 'N/I']);
         });
     });
-    (doc as any).autoTable({ startY: 25, head: [['Data', 'Vtr', 'Material', 'Status', 'Obs']], body: news });
+    (doc as any).autoTable({ startY: 25, head: [['Data', 'Vtr', 'Material', 'Status', 'Obs']], body: news, headStyles: { fillColor: [220, 38, 38] } });
+    
     if (isPreview) window.open(doc.output('bloburl'));
     else doc.save(`Novidades_${monthYear}.pdf`);
 };
 
-export const generateEfficiencyReportPDF = (checks: InventoryCheck[], viaturas: Viatura[], monthYear: string) => {
+export const generateEfficiencyReportPDF = (checks: InventoryCheck[], viaturas: Viatura[], monthYear: string, isPreview: boolean = false) => {
   const JsPDF = getJsPDF();
   const doc = new JsPDF();
+  doc.setFont('helvetica', 'bold');
   doc.text(`EFICIÊNCIA DE CONFERÊNCIA - ${monthYear}`, 105, 15, { align: "center" });
   const data = viaturas.map(v => {
     const count = checks.filter(c => c.viaturaId === v.id && safeDateIso(c.date).startsWith(monthYear)).length;
-    return [v.prefix, count.toString(), `${((count/30)*100).toFixed(1)}%`];
+    const [year, month] = monthYear.split('-').map(Number);
+    const totalDays = new Date(year, month, 0).getDate();
+    return [v.prefix, count.toString(), `${((count / totalDays) * 100).toFixed(1)}%`];
   });
-  (doc as any).autoTable({ startY: 25, head: [['Vtr', 'Dias Conferidos', '%']], body: data });
-  doc.save(`Eficiencia_${monthYear}.pdf`);
+  (doc as any).autoTable({ startY: 25, head: [['Viatura', 'Dias Conferidos', 'Eficiência (%)']], body: data, headStyles: { fillColor: [22, 163, 74] } });
+  
+  if (isPreview) window.open(doc.output('bloburl'));
+  else doc.save(`Eficiencia_${monthYear}.pdf`);
 };
 
-export const generateDailyManualCheckPDF = (viatura: Viatura) => {
+export const generateDailyManualCheckPDF = (viatura: Viatura, isPreview: boolean = false) => {
   const JsPDF = getJsPDF();
   const doc = new JsPDF();
+  doc.setFont('helvetica', 'bold');
   doc.text(`CHECKLIST MANUAL - ${viatura.prefix}`, 105, 15, { align: "center" });
-  const body = viatura.items.map(i => [i.quantity, i.name, '[ ] S [ ] CN']);
-  (doc as any).autoTable({ startY: 25, head: [['Qtd', 'Material', 'Status']], body: body });
-  doc.save(`Manual_${viatura.prefix}.pdf`);
+  doc.setFontSize(8);
+  doc.text("Data: ____/____/____   Turno: [ ] Verde [ ] Amarela [ ] Azul", 10, 25);
+  doc.text("Comandante: _________________________________  Equipe: _________________________________", 10, 30);
+  
+  const body = viatura.items.map(i => [i.quantity, i.name, '[  ] S  [  ] CN']);
+  (doc as any).autoTable({ startY: 35, head: [['Qtd', 'Material', 'Status']], body: body, theme: 'grid' });
+  
+  if (isPreview) window.open(doc.output('bloburl'));
+  else doc.save(`Manual_Diario_${viatura.prefix}.pdf`);
 };
 
-export const generateMonthlyManualCheckPDF = (viatura: Viatura, monthYear: string) => {
+export const generateMonthlyManualCheckPDF = (viatura: Viatura, monthYear: string, isPreview: boolean = false) => {
   const JsPDF = getJsPDF();
   const doc = new JsPDF('l', 'mm', 'a4');
+  doc.setFont('helvetica', 'bold');
   doc.text(`MAPA MENSAL EM BRANCO - ${viatura.prefix}`, 148, 15, { align: "center" });
-  doc.save(`Mapa_Manual_${viatura.prefix}.pdf`);
+  doc.setFontSize(8);
+  doc.text(`Referência: ${monthYear}`, 148, 20, { align: "center" });
+  
+  const [year, month] = monthYear.split('-').map(Number);
+  const days = new Date(year, month, 0).getDate();
+  const head = ['Material', ...Array.from({ length: days }, (_, i) => (i + 1).toString())];
+  const body = viatura.items.map(i => [i.name, ...Array(days).fill('')]);
+  
+  (doc as any).autoTable({ startY: 25, head: [head], body: body, theme: 'grid', styles: { fontSize: 5, cellPadding: 1 } });
+  
+  if (isPreview) window.open(doc.output('bloburl'));
+  else doc.save(`Mapa_Manual_${viatura.prefix}_${monthYear}.pdf`);
 };
 
-// Fix: Adicionando exportação de generateAuditLogPDF solicitada pelo LogManager.tsx
 export const generateAuditLogPDF = (logs: LogEntry[]) => {
   const JsPDF = getJsPDF();
   const doc = new JsPDF('l', 'mm', 'a4');
@@ -269,9 +296,4 @@ export const generateAuditLogPDF = (logs: LogEntry[]) => {
   });
 
   doc.save(`Relatorio_Auditoria_${new Date().toISOString().split('T')[0]}.pdf`);
-};
-
-const formatDateShort = (dateStr: string) => {
-    const parts = safeDateIso(dateStr).split('-');
-    return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : dateStr;
 };
