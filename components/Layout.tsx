@@ -1,6 +1,6 @@
 
-import React from 'react';
-import { User, PermissionKey } from '../types';
+import React, { useMemo } from 'react';
+import { User, PermissionKey, GB, Subgrupamento, Posto } from '../types';
 import { APP_NAME } from '../constants';
 
 interface LayoutProps {
@@ -11,9 +11,23 @@ interface LayoutProps {
   children: React.ReactNode;
   isFullScreen?: boolean;
   permissions: PermissionKey[];
+  gbs?: GB[];
+  subs?: Subgrupamento[];
+  postos?: Posto[];
 }
 
-const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab, children, isFullScreen = false, permissions }) => {
+const Layout: React.FC<LayoutProps> = ({ 
+  user, 
+  onLogout, 
+  activeTab, 
+  setActiveTab, 
+  children, 
+  isFullScreen = false, 
+  permissions,
+  gbs = [],
+  subs = [],
+  postos = []
+}) => {
   const tabs = [];
 
   if (permissions.includes('view_dashboard')) {
@@ -53,6 +67,26 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
   // Ajuda disponível para todos
   tabs.push({ id: 'help', label: 'Ajuda / Manual', icon: '❓' });
 
+  // Lógica para determinar o rótulo da unidade na sidebar
+  const unitLabel = useMemo(() => {
+    const gbName = gbs[0]?.name || '20º GB';
+    
+    if (!user.scopeLevel || user.scopeLevel === 'GLOBAL') {
+      return `${gbName} • ACESSO GLOBAL`;
+    }
+
+    let unitName = 'UNIDADE';
+    if (user.scopeLevel === 'POSTO') {
+      unitName = postos.find(p => p.id === user.scopeId)?.name || 'POSTO';
+    } else if (user.scopeLevel === 'SGB') {
+      unitName = subs.find(s => s.id === user.scopeId)?.name || 'SGB';
+    } else if (user.scopeLevel === 'GB') {
+      unitName = gbs.find(g => g.id === user.scopeId)?.name || 'GB';
+    }
+
+    return `${gbName} • ${unitName.toUpperCase()}`;
+  }, [user, postos, subs, gbs]);
+
   if (isFullScreen) {
     return (
       <div className="min-h-screen flex flex-col animate-in fade-in duration-500" style={{ backgroundColor: 'var(--theme-bg)' }}>
@@ -71,7 +105,9 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
           <h1 className="text-lg font-bold flex items-center gap-3 text-[var(--theme-text-inv)]">
             <span className="text-2xl" style={{ color: 'var(--theme-primary)' }}>🚒</span> {APP_NAME}
           </h1>
-          <p className="text-[10px] text-white/50 mt-2 uppercase tracking-widest font-semibold pl-1">20º GB • Birigui</p>
+          <p className="text-[10px] text-white/50 mt-2 uppercase tracking-widest font-semibold pl-1">
+            {unitLabel}
+          </p>
         </div>
         
         <nav className="flex-1 p-4 space-y-1">

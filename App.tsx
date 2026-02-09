@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { User, UserRole, Viatura, InventoryCheck, GB, Subgrupamento, Posto, LogEntry, RolePermissions, PermissionKey, Notice } from './types';
+import { User, UserRole, Viatura, InventoryCheck, GB, Subgrupamento, Posto, LogEntry, RolePermissions, PermissionKey, Theme, Notice } from './types';
 import { DataService } from './services/dataService';
-import { DEFAULT_ROLE_PERMISSIONS, DEFAULT_THEME, APP_NAME, DEFAULT_HEADER } from './constants';
+import { DEFAULT_ROLE_PERMISSIONS, DEFAULT_THEME } from './constants';
 import { applyThemeToDocument } from './utils/themeUtils';
 import Layout from './components/Layout';
 import Login from './components/Login';
@@ -18,6 +18,7 @@ import ParametersManager from './components/ParametersManager';
 import ThemeManager from './components/ThemeManager';
 import NoticeManager from './components/NoticeManager';
 import HelpManual from './components/HelpManual';
+import { APP_NAME } from './constants';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -37,6 +38,7 @@ const App: React.FC = () => {
   const [rolePermissions, setRolePermissions] = useState<RolePermissions>(DEFAULT_ROLE_PERMISSIONS);
 
   useEffect(() => {
+    // Inicializa o tema padrão antes de carregar
     applyThemeToDocument(DEFAULT_THEME);
     setIsInitializing(true);
     loadData(true);
@@ -53,13 +55,14 @@ const App: React.FC = () => {
     else setIsLoading(true);
 
     try {
-      const [vtrs, chks, usrs, g, s, p, settings, ntc] = await Promise.all([
+      const [vtrs, chks, usrs, g, s, p, l, settings, ntc] = await Promise.all([
         DataService.getViaturas(),
         DataService.getChecks(),
         DataService.getUsers(),
         DataService.getGBS(),
         DataService.getSubs(),
         DataService.getPostos(),
+        DataService.getLogs(),
         DataService.getSettings(),
         DataService.getNotices()
       ]);
@@ -69,9 +72,11 @@ const App: React.FC = () => {
       setGbs(g || []);
       setSubs(s || []);
       setPostos(p || []);
+      setLogs(l || []);
       setNotices(ntc || []); 
       setRolePermissions(settings.rolePermissions || DEFAULT_ROLE_PERMISSIONS);
       
+      // Aplica o tema salvo se existir
       if (settings.activeTheme) {
         applyThemeToDocument(settings.activeTheme);
       }
@@ -84,6 +89,7 @@ const App: React.FC = () => {
     }
   };
 
+  // Cálculo das permissões efetivas do usuário logado
   const currentUserPermissions = useMemo<PermissionKey[]>(() => {
     if (!user) return [];
     const basePermissions = rolePermissions[user.role] || [];
@@ -91,20 +97,32 @@ const App: React.FC = () => {
     return Array.from(new Set([...basePermissions, ...custom]));
   }, [user, rolePermissions]);
 
+  // Filtragem de viaturas baseada no escopo do usuário (GB, SGB, Posto)
   const visibleViaturas = useMemo(() => {
     if (!user) return [];
     if (!user.scopeLevel || user.scopeLevel === 'GLOBAL') return viaturas;
 
     return viaturas.filter(v => {
-      const posto = postos.find(p => p.id === v.postoId);
+      // Prioriza encontrar o posto pela associação direta ou busca na lista
+      const vtrPostoId = v.postoId;
+      if (!vtrPostoId) return false;
+
+      const posto = postos.find(p => p.id === vtrPostoId);
       if (!posto) return false;
 
-      if (user.scopeLevel === 'POSTO') return posto.id === user.scopeId;
-      if (user.scopeLevel === 'SGB') return posto.subId === user.scopeId;
+      if (user.scopeLevel === 'POSTO') {
+        return posto.id === user.scopeId;
+      }
+
+      if (user.scopeLevel === 'SGB') {
+        return posto.subId === user.scopeId;
+      }
+
       if (user.scopeLevel === 'GB') {
         const sub = subs.find(s => s.id === posto.subId);
         return sub?.gbId === user.scopeId;
       }
+      
       return false;
     });
   }, [viaturas, user, postos, subs]);
@@ -135,7 +153,7 @@ const App: React.FC = () => {
     try {
       await DataService.saveViatura(vtr);
       if (user) {
-        await DataService.saveLog({ userId: user.id, userName: user.name, action: 'SAVE_VTR', details: `Vtr ${vtr.prefix} salva.` });
+        await DataService.saveLog({ userId: user.id, userName: user.name, action: 'SAVE_VTR', details: `Vtr ${vtr.prefix} status: ${vtr.status} - Lista de Materiais alterada/salva.` });
       }
       await loadData();
     } catch (e) {
@@ -185,16 +203,28 @@ const App: React.FC = () => {
     await loadData();
   };
 
+  // --- Funções de Avisos ---
   const handleSaveNotice = async (n: Notice) => {
     setIsLoading(true);
+    // Atualização Otimista: Exibe imediatamente para o usuário
+    setNotices(prev => {
+      const exists = prev.some(item => item.id === n.id);
+      if (exists) return prev.map(item => item.id === n.id ? n : item);
+      return [...prev, n];
+    });
+
     try {
       await DataService.saveNotice(n);
       if (user) {
-        await DataService.saveLog({ userId: user.id, userName: user.name, action: 'SAVE_NOTICE', details: `Aviso publicado: ${n.title}` });
+        await DataService.saveLog({ userId: user.id, userName: user.name, action: 'SAVE_NOTICE', details: `Aviso publicado/editado: ${n.title}` });
       }
-      await loadData();
+      // Reload silencioso para confirmar dados
+      const updatedNotices = await DataService.getNotices();
+      if(updatedNotices && updatedNotices.length > 0) setNotices(updatedNotices);
     } catch (e) {
-      alert("Erro ao salvar aviso.");
+      console.error(e);
+      // Reverter se necessário ou alertar
+      alert("Aviso salvo localmente, mas houve erro na sincronização com a nuvem.");
     } finally {
       setIsLoading(false);
     }
@@ -202,58 +232,36 @@ const App: React.FC = () => {
 
   const handleDeleteNotice = async (id: string) => {
     setIsLoading(true);
+    // Atualização Otimista
+    setNotices(prev => prev.filter(n => n.id !== id));
+
     try {
       await DataService.deleteNotice(id);
       if (user) {
         await DataService.saveLog({ userId: user.id, userName: user.name, action: 'DEL_NOTICE', details: `Aviso removido ID: ${id}` });
       }
-      await loadData();
+      const updatedNotices = await DataService.getNotices();
+      setNotices(updatedNotices);
     } catch (e) {
-      alert("Erro ao deletar aviso.");
+      alert("Erro ao deletar aviso na nuvem.");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSaveGB = async (gb: GB) => { 
-    await DataService.saveGB(gb); 
-    if (user) await DataService.saveLog({ userId: user.id, userName: user.name, action: 'SAVE_GB', details: `Grupamento salvo: ${gb.name}` });
-    await loadData(); 
-  };
-  const handleDeleteGB = async (id: string) => { 
-    const item = gbs.find(i => i.id === id);
-    await DataService.deleteGB(id); 
-    if (user) await DataService.saveLog({ userId: user.id, userName: user.name, action: 'DEL_GB', details: `Grupamento removido: ${item?.name}` });
-    await loadData(); 
-  };
-  const handleSaveSub = async (sub: Subgrupamento) => { 
-    await DataService.saveSub(sub); 
-    if (user) await DataService.saveLog({ userId: user.id, userName: user.name, action: 'SAVE_SUB', details: `Subgrupamento salvo: ${sub.name}` });
-    await loadData(); 
-  };
-  const handleDeleteSub = async (id: string) => { 
-    const item = subs.find(i => i.id === id);
-    await DataService.deleteSub(id); 
-    if (user) await DataService.saveLog({ userId: user.id, userName: user.name, action: 'DEL_SUB', details: `Subgrupamento removido: ${item?.name}` });
-    await loadData(); 
-  };
-  const handleSavePosto = async (p: Posto) => { 
-    await DataService.savePosto(p); 
-    if (user) await DataService.saveLog({ userId: user.id, userName: user.name, action: 'SAVE_POSTO', details: `Posto salvo: ${p.name}` });
-    await loadData(); 
-  };
-  const handleDeletePosto = async (id: string) => { 
-    const item = postos.find(i => i.id === id);
-    await DataService.deletePosto(id); 
-    if (user) await DataService.saveLog({ userId: user.id, userName: user.name, action: 'DEL_POSTO', details: `Posto removido: ${item?.name}` });
-    await loadData(); 
-  };
+  const handleSaveGB = async (gb: GB) => { await DataService.saveGB(gb); await loadData(); };
+  const handleDeleteGB = async (id: string) => { await DataService.deleteGB(id); await loadData(); };
+  const handleSaveSub = async (sub: Subgrupamento) => { await DataService.saveSub(sub); await loadData(); };
+  const handleDeleteSub = async (id: string) => { await DataService.deleteSub(id); await loadData(); };
+  const handleSavePosto = async (p: Posto) => { await DataService.savePosto(p); await loadData(); };
+  const handleDeletePosto = async (id: string) => { await DataService.deletePosto(id); await loadData(); };
 
   if (isInitializing) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center space-y-8 animate-in fade-in duration-700" style={{ backgroundColor: 'var(--theme-secondary)' }}>
         <div className="relative">
           <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl shadow-[0_0_40px_rgba(255,255,255,0.2)] animate-pulse" style={{ backgroundColor: 'var(--theme-primary)', color: 'white' }}>🚒</div>
+          <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-white rounded-full flex items-center justify-center animate-spin"><span className="text-slate-900 text-xs font-bold">↻</span></div>
         </div>
         <div className="text-center space-y-2">
           <h1 className="text-2xl font-black tracking-tighter text-white">{APP_NAME}</h1>
@@ -273,6 +281,9 @@ const App: React.FC = () => {
       setActiveTab={setActiveTab} 
       isFullScreen={isFullScreen}
       permissions={currentUserPermissions}
+      gbs={gbs}
+      subs={subs}
+      postos={postos}
     >
       {isLoading && (
         <div className="fixed top-0 left-0 w-full h-1 z-[100] overflow-hidden bg-slate-100">
@@ -281,8 +292,18 @@ const App: React.FC = () => {
       )}
       <style>{`@keyframes loading { 0% { width: 0; transform: translateX(-100%); } 50% { width: 70%; transform: translateX(50%); } 100% { width: 100%; transform: translateX(100%); } }`}</style>
 
+      {/* Renderiza apenas se tiver permissão */}
       {activeTab === 'dashboard' && currentUserPermissions.includes('view_dashboard') && 
-        <Dashboard viaturas={visibleViaturas} checks={checks} postos={postos} logs={logs} notices={notices} />}
+        <Dashboard 
+          viaturas={visibleViaturas} 
+          checks={checks} 
+          postos={postos} 
+          subs={subs}
+          gbs={gbs}
+          logs={logs} 
+          notices={notices} 
+          currentUser={user}
+        />}
       
       {activeTab === 'checklist' && currentUserPermissions.includes('perform_checklist') && 
         <Checklist viaturas={visibleViaturas} checks={checks} onComplete={handleCompleteCheck} onFullScreenChange={setIsFullScreen} />}

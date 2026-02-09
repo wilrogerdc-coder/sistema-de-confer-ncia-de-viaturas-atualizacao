@@ -32,6 +32,27 @@ export const getProntidaoInfo = (date: Date) => {
 };
 
 /**
+ * Retorna a Data de Referência Operacional (Shift Date)
+ * Baseado no turno de 24h que inicia as 07:30.
+ * Ex: 02/01/2026 as 05:00 pertence ao turno do dia 01/01/2026.
+ */
+export const getShiftReferenceDate = (date: Date | string): string => {
+  const d = new Date(date);
+  const hour = d.getHours();
+  const minute = d.getMinutes();
+  
+  // Se for antes das 07:30, retrocede um dia para o dia que iniciou o turno
+  if (hour < 7 || (hour === 7 && minute < 30)) {
+    d.setDate(d.getDate() - 1);
+  }
+  
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+/**
  * Helper para limpar strings de data (remove parte de tempo ISO se existir)
  */
 export const safeDateIso = (dateStr: string): string => {
@@ -66,15 +87,12 @@ export const isNoticeExpired = (expirationDate?: string): boolean => {
   const today = getLocalTodayISO();
   
   // Comparação léxica de strings ISO (YYYY-MM-DD) funciona corretamente
-  // Ex: "2023-10-20" < "2023-10-21" é true (Expirado)
-  // Ex: "2023-10-21" < "2023-10-21" é false (Válido até o fim do dia)
   return cleanExp < today;
 };
 
 /**
  * Formata uma data (Date object ou string YYYY-MM-DD) para formato legível PT-BR.
  * Resolve o problema de timezone onde a data aparecia como dia anterior.
- * Protege contra Invalid Date.
  */
 export const formatFullDate = (dateInput: Date | string) => {
   try {
@@ -84,7 +102,6 @@ export const formatFullDate = (dateInput: Date | string) => {
       const cleanDate = safeDateIso(dateInput);
       const [y, m, d] = cleanDate.split('-').map(Number);
       
-      // Validação básica se o split funcionou
       if (!y || !m || !d) return 'Data Inválida';
 
       // Cria data local meio-dia para segurança
@@ -110,7 +127,7 @@ export const formatDateShort = (dateInput: string) => {
   try {
     const cleanDate = safeDateIso(dateInput);
     const parts = cleanDate.split('-');
-    if (parts.length !== 3) return cleanDate; // Retorna original se falhar parse
+    if (parts.length !== 3) return cleanDate; 
 
     const [y, m, d] = parts.map(Number);
     return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;

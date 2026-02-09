@@ -1,43 +1,65 @@
 
 import React, { useMemo } from 'react';
-import { Viatura, InventoryCheck, ProntidaoColor, Posto, LogEntry, Notice } from '../types';
+import { Viatura, InventoryCheck, ProntidaoColor, Posto, LogEntry, Notice, User, Subgrupamento, GB } from '../types';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
-import { getProntidaoInfo, formatFullDate, safeDateIso, isNoticeExpired } from '../utils/calendarUtils';
+import { getProntidaoInfo, formatFullDate, safeDateIso } from '../utils/calendarUtils';
 import { DEFAULT_HEADER, PRONTIDAO_CYCLE } from '../constants';
 
 interface DashboardProps {
   viaturas: Viatura[];
   checks: InventoryCheck[];
   postos: Posto[];
+  subs: Subgrupamento[];
+  gbs: GB[];
   logs: LogEntry[];
   notices: Notice[];
+  currentUser: User;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, notices }) => {
+const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, gbs, logs, notices, currentUser }) => {
   const currentProntidao = getProntidaoInfo(new Date());
-  const postoName = postos.length > 0 ? postos[0].name : DEFAULT_HEADER.pelotao;
 
-  // Filtragem de avisos ativos e não expirados
-  const activeNotices = useMemo(() => {
-    return notices
-      .filter(n => n.active && !isNoticeExpired(n.expirationDate))
-      .sort((a, b) => {
-        const priorityMap: Record<string, number> = { 'URGENTE': 0, 'ALTA': 1, 'NORMAL': 2 };
-        return priorityMap[a.priority] - priorityMap[b.priority];
-      });
-  }, [notices]);
+  // Lógica para determinar o nome da unidade no cabeçalho baseada no escopo
+  const headerInfo = useMemo(() => {
+    if (!currentUser.scopeLevel || currentUser.scopeLevel === 'GLOBAL') {
+      return {
+        name: postos.length > 0 ? postos[0].name : DEFAULT_HEADER.pelotao,
+        isGlobal: true,
+        label: 'Acesso Global'
+      };
+    }
 
-  // Statistics
-  const totalViaturas = viaturas.length;
-  
+    let scopeName = 'Unidade Desconhecida';
+    if (currentUser.scopeLevel === 'POSTO') {
+      scopeName = postos.find(p => p.id === currentUser.scopeId)?.name || 'Posto não localizado';
+    } else if (currentUser.scopeLevel === 'SGB') {
+      scopeName = subs.find(s => s.id === currentUser.scopeId)?.name || 'Subgrupamento não localizado';
+    } else if (currentUser.scopeLevel === 'GB') {
+      scopeName = gbs.find(g => g.id === currentUser.scopeId)?.name || 'Grupamento não localizado';
+    }
+
+    return {
+      name: scopeName,
+      isGlobal: false,
+      label: `Nível ${currentUser.scopeLevel}`
+    };
+  }, [currentUser, postos, subs, gbs]);
+
+  // Filtra os checks baseados nas viaturas visíveis para que as estatísticas reflitam o escopo
+  const filteredChecks = useMemo(() => {
+    const visibleVtrIds = new Set(viaturas.map(v => v.id));
+    return checks.filter(c => visibleVtrIds.has(c.viaturaId));
+  }, [checks, viaturas]);
+
   const today = new Date();
   today.setHours(0,0,0,0);
   const todayStr = today.toISOString().split('T')[0];
 
-  const checksToday = checks.filter(c => safeDateIso(c.date) === todayStr).length;
+  // Volume de Produção usando os checks filtrados
+  const checksToday = filteredChecks.filter(c => safeDateIso(c.date) === todayStr).length;
   
   const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  const checksThisMonth = checks.filter(c => {
+  const checksThisMonth = filteredChecks.filter(c => {
     const cDate = new Date(safeDateIso(c.date) + 'T12:00:00');
     return cDate >= startOfMonth;
   });
@@ -45,16 +67,19 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
 
   const startOfWeek = new Date(today);
   startOfWeek.setDate(today.getDate() - today.getDay());
-  const checksThisWeek = checks.filter(c => {
+  const checksThisWeek = filteredChecks.filter(c => {
     const cDate = new Date(safeDateIso(c.date) + 'T12:00:00');
     return cDate >= startOfWeek;
   }).length;
 
+  // Dados para o Gráfico - Usando checks filtrados
   const shiftStats = PRONTIDAO_CYCLE.map(p => {
     let colorVar = '--readiness-azul';
     if (p.color === ProntidaoColor.VERDE) colorVar = '--readiness-verde';
     if (p.color === ProntidaoColor.AMARELA) colorVar = '--readiness-amarela';
+    
     const computedColor = getComputedStyle(document.documentElement).getPropertyValue(colorVar).trim() || p.hex;
+
     return {
       name: p.label,
       value: checksThisMonth.filter(c => c.shiftColor === p.label).length,
@@ -62,47 +87,49 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
     };
   }).filter(s => s.value > 0);
 
+  // Contadores de viaturas (já filtradas em App.tsx)
   const operativeCount = viaturas.filter(v => String(v.status).trim().toUpperCase() === "OPERANDO").length;
   const reserveCount = viaturas.filter(v => String(v.status).trim().toUpperCase() === "RESERVA").length;
   const downCount = viaturas.filter(v => String(v.status).trim().toUpperCase() === "BAIXADA").length;
 
   const pendingOperativeViaturas = viaturas
     .filter(v => String(v.status).trim().toUpperCase() === "OPERANDO")
-    .map((v) => {
-      const checkedToday = checks.some(c => c.viaturaId === v.id && safeDateIso(c.date) === todayStr);
+    .map((v): { name: string; days: string | number; id: string } | null => {
+      const checkedToday = filteredChecks.some(c => c.viaturaId === v.id && safeDateIso(c.date) === todayStr);
       if (checkedToday) return null;
-      const vtrChecks = checks.filter(c => c.viaturaId === v.id);
+
+      const vtrChecks = filteredChecks.filter(c => c.viaturaId === v.id);
       if (vtrChecks.length === 0) return { name: v.prefix, days: '∞', id: v.id };
+      
       const sorted = [...vtrChecks].sort((a,b) => b.date.localeCompare(a.date));
       const lastDate = new Date(safeDateIso(sorted[0].date) + 'T12:00:00');
       lastDate.setHours(0,0,0,0);
+      
       const diffTime = Math.abs(today.getTime() - lastDate.getTime());
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       return { name: v.prefix, days: diffDays, id: v.id };
-    }).filter(v => v !== null);
+    }).filter((v): v is { name: string; days: string | number; id: string } | null => v !== null);
 
   const activeStyle = useMemo(() => {
     let varName = '--readiness-azul';
     if (currentProntidao.color === ProntidaoColor.VERDE) varName = '--readiness-verde';
     if (currentProntidao.color === ProntidaoColor.AMARELA) varName = '--readiness-amarela';
+
     return {
       headerBg: `linear-gradient(135deg, var(${varName}), color-mix(in srgb, var(${varName}), black 10%))`,
       headerShadow: `0 20px 25px -5px color-mix(in srgb, var(${varName}), white 60%)`,
-      badgeBg: `color-mix(in srgb, var(${varName}), transparent 70%)`
+      badgeBg: `color-mix(in srgb, var(${varName}), transparent 70%)`,
+      textColor: `color-mix(in srgb, var(${varName}), black 40%)`,
+      lightBg: `color-mix(in srgb, var(${varName}), white 90%)`,
+      borderColor: `color-mix(in srgb, var(${varName}), white 50%)`,
+      pendingColor: 'var(--readiness-amarela)',
+      lateColor: 'var(--readiness-verde)'
     };
   }, [currentProntidao]);
 
-  const getPriorityBadge = (priority: string) => {
-    switch(priority) {
-      case 'URGENTE': return 'bg-red-600 text-white animate-pulse';
-      case 'ALTA': return 'bg-orange-500 text-white';
-      default: return 'bg-blue-500 text-white';
-    }
-  };
-
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
-      {/* Header com Status do Plantão */}
+      {/* Header com Status do Plantão e Indicador de Escopo */}
       <div 
         className="relative overflow-hidden rounded-[2.5rem] p-8 text-white transition-all duration-500"
         style={{ background: activeStyle.headerBg, boxShadow: activeStyle.headerShadow }}
@@ -113,14 +140,21 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
             <div className="flex items-center justify-center lg:justify-start gap-3 mb-2">
               <span className="text-4xl">🚒</span>
               <div 
-                className="px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest backdrop-blur-md text-white"
+                className="px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest backdrop-blur-md text-white flex items-center gap-2"
                 style={{ backgroundColor: activeStyle.badgeBg }}
               >
                 Prontidão {currentProntidao.label}
+                {headerInfo.isGlobal && (
+                  <span className="bg-white/20 px-2 py-0.5 rounded-full border border-white/20 animate-pulse">Exibição Global</span>
+                )}
               </div>
             </div>
-            <h1 className="text-3xl md:text-4xl font-black tracking-tighter uppercase leading-none">{postoName}</h1>
-            <p className="text-sm font-medium opacity-90 capitalize">{formatFullDate(new Date())} • Turno 07:30 - 07:29</p>
+            <h1 className="text-3xl md:text-4xl font-black tracking-tighter uppercase leading-none">
+              {headerInfo.name}
+            </h1>
+            <p className="text-sm font-medium opacity-90 capitalize">
+              {formatFullDate(new Date())} • {headerInfo.label}
+            </p>
           </div>
 
           <div className="grid grid-cols-3 gap-3 w-full lg:w-auto">
@@ -140,30 +174,10 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
         </div>
       </div>
 
-      {/* Mural de Avisos Dinâmico */}
-      {activeNotices.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {activeNotices.map(notice => (
-            <div key={notice.id} className={`p-5 rounded-3xl bg-white border-2 shadow-sm relative overflow-hidden transition-all hover:shadow-md ${notice.priority === 'URGENTE' ? 'border-red-500 ring-4 ring-red-50' : 'border-slate-100'}`}>
-              <div className="flex justify-between items-start mb-3">
-                <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-widest ${getPriorityBadge(notice.priority)}`}>
-                  {notice.priority}
-                </span>
-                <span className="text-[10px] font-bold text-slate-300">📌</span>
-              </div>
-              <h4 className="font-black text-slate-800 text-sm mb-1 uppercase tracking-tight leading-tight">{notice.title}</h4>
-              <p className="text-xs text-slate-500 font-medium leading-relaxed">{notice.content}</p>
-              <div className="mt-4 pt-3 border-t border-slate-50 flex justify-between items-center">
-                <span className="text-[9px] font-black text-slate-400 uppercase">Por: {notice.createdBy.split(' ').pop()}</span>
-                <span className="text-[9px] font-bold text-slate-300">{new Date(notice.createdAt).toLocaleDateString('pt-BR')}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        {/* Coluna Esquerda: Estatísticas e Gráfico */}
         <div className="xl:col-span-2 space-y-6">
+          {/* Cards de Produção */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-between h-32 relative overflow-hidden group hover:shadow-md transition-all">
               <div className="absolute right-[-10px] top-[-10px] text-6xl opacity-5 group-hover:opacity-10 transition-opacity">📅</div>
@@ -191,11 +205,12 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
             </div>
           </div>
 
+          {/* Gráfico de Prontidão */}
           <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-200">
             <div className="flex justify-between items-center mb-6">
               <div>
                  <h3 className="text-lg font-black text-slate-800 tracking-tight">Distribuição por Prontidão</h3>
-                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Referência: Mês Atual</p>
+                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Referência: Mês Atual ({headerInfo.name})</p>
               </div>
               <div className="text-[10px] font-bold bg-slate-100 px-3 py-1 rounded-full text-slate-500 uppercase">Total: {checksThisMonthCount}</div>
             </div>
@@ -229,20 +244,21 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-slate-300">
                   <span className="text-4xl mb-2">📊</span>
-                  <span className="font-bold text-xs uppercase tracking-widest">Sem dados estatísticos neste mês</span>
+                  <span className="font-bold text-xs uppercase tracking-widest">Sem dados estatísticos para este escopo</span>
                 </div>
               )}
             </div>
           </div>
         </div>
 
+        {/* Coluna Direita: Pendências */}
         <div className="space-y-6">
           <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-200 flex flex-col min-h-[400px]">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-100">
               <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-500 text-xl">⚠️</div>
               <div>
                 <h3 className="text-lg font-black text-slate-800 tracking-tight">Pendências do Dia</h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Viaturas Operando não conferidas</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Filtrado por: {headerInfo.name}</p>
               </div>
             </div>
             
@@ -252,7 +268,7 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
                   <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-3xl mx-auto shadow-inner">✨</div>
                   <div>
                     <p className="text-slate-800 font-black text-sm">Tudo Limpo!</p>
-                    <p className="text-slate-500 text-xs font-medium">Todas as viaturas foram conferidas.</p>
+                    <p className="text-slate-500 text-xs font-medium">Todas as viaturas vinculadas foram conferidas.</p>
                   </div>
                 </div>
               ) : (
@@ -266,6 +282,9 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, logs, n
                       <span className={`text-[9px] font-black px-2 py-1 rounded-lg uppercase tracking-wide ${v!.days === '∞' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'}`}>
                         {v!.days === '∞' ? 'Nunca' : `${v!.days}d atraso`}
                       </span>
+                    </div>
+                    <div className="mt-3 w-full h-1 bg-slate-200 rounded-full overflow-hidden">
+                      <div className="h-full bg-red-500 w-1/4 animate-pulse"></div>
                     </div>
                   </div>
                 ))
