@@ -3,28 +3,30 @@ import { ProntidaoColor } from '../types';
 import { PRONTIDAO_CYCLE } from '../constants';
 
 /**
- * Calculates the readiness color based on the shift logic:
- * Starts 01/01/2026 07:30 (VERDE).
- * Cycles every 24 hours (07:30 to 07:29 next day).
- * Sequence: VERDE -> AMARELA -> AZUL
+ * Calcula a cor da prontidão baseada na lógica de turnos:
+ * Início em 01/01/2026 07:30 (VERDE).
+ * Ciclos de 24 horas (07:30 às 07:29 do dia seguinte).
+ * Sequência: VERDE -> AMARELA -> AZUL
  */
 export const getProntidaoInfo = (date: Date) => {
-  const baseDate = new Date('2026-01-01T07:30:00');
+  // Criar data base usando componentes locais para evitar erros de timezone (UTC)
+  const baseDate = new Date(2026, 0, 1, 7, 30, 0, 0);
   
   const checkDate = new Date(date);
   const hour = checkDate.getHours();
   const minute = checkDate.getMinutes();
   
-  // Define o início da prontidão atual
+  // Define o início do turno operacional atual
   let shiftStartDate = new Date(checkDate);
   if (hour < 7 || (hour === 7 && minute < 30)) {
-    // Se for antes das 07:30, pertence ao turno que começou ontem
+    // Se for antes das 07:30, pertence ao turno que começou no dia anterior
     shiftStartDate.setDate(shiftStartDate.getDate() - 1);
   }
   shiftStartDate.setHours(7, 30, 0, 0);
 
+  // Calcula a diferença em dias inteiros considerando o horário local
   const diffInMs = shiftStartDate.getTime() - baseDate.getTime();
-  const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+  const diffInDays = Math.round(diffInMs / (1000 * 60 * 60 * 24));
   
   // Ciclo de 3 dias (Verde, Amarela, Azul)
   const index = ((diffInDays % 3) + 3) % 3;
@@ -92,7 +94,6 @@ export const isNoticeExpired = (expirationDate?: string): boolean => {
 
 /**
  * Formata uma data (Date object ou string YYYY-MM-DD) para formato legível PT-BR.
- * Resolve o problema de timezone onde a data aparecia como dia anterior.
  */
 export const formatFullDate = (dateInput: Date | string) => {
   try {
@@ -127,7 +128,7 @@ export const formatDateShort = (dateInput: string) => {
   try {
     const cleanDate = safeDateIso(dateInput);
     const parts = cleanDate.split('-');
-    if (parts.length !== 3) return cleanDate; 
+    if (parts.length !== 3) return dateInput; 
 
     const [y, m, d] = parts.map(Number);
     return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;

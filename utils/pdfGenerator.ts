@@ -25,6 +25,7 @@ export const generateInventoryPDF = (check: InventoryCheck, viatura: Viatura, is
   const header = check.headerDetails;
   
   // RECALCULA A COR DA PRONTIDÃO PELO TIMESTAMP PARA GARANTIR FIDELIDADE AO TURNO
+  // Isso corrige casos como conferências às 07:08 que devem pertencer ao turno anterior
   const shiftInfo = getProntidaoInfo(new Date(check.timestamp));
   const themeColor = shiftInfo ? shiftInfo.hex : '#dc2626';
   const rgb = hexToRgb(themeColor);
@@ -123,8 +124,45 @@ export const generateInventoryPDF = (check: InventoryCheck, viatura: Viatura, is
       3: { cellWidth: 'auto' },
     },
     margin: { left: 15, right: 15 },
-    rowPageBreak: 'avoid'
+    rowPageBreak: 'avoid',
+    didDrawPage: (data: any) => {
+      // Adiciona o rodapé solicitado em todas as páginas ou apenas na última se houver espaço
+    }
   });
+
+  // Cálculo de posição para o rodapé após a tabela
+  let finalY = (doc as any).lastAutoTable.finalY + 10;
+  
+  // Verifica se o rodapé cabe na página atual, senão adiciona nova página
+  if (finalY > 240) {
+    doc.addPage();
+    finalY = 20;
+  }
+
+  doc.setFontSize(8);
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.text("ASSINATURAS:", 15, finalY);
+  finalY += 5;
+  
+  doc.setFont('helvetica', 'normal');
+  doc.text(`CONFERENTES: ${check.responsibleNames?.join(', ') || 'Não informado'}`, 15, finalY);
+  finalY += 5;
+  doc.text(`COMANDANTE DA VTR: ${check.commanderName || 'Não informado'}`, 15, finalY);
+  finalY += 8;
+
+  doc.setFont('helvetica', 'bold');
+  doc.text("Legenda: S (Sem Novidade) | CN (Com Novidade) | NA (Novidade Anterior)", 15, finalY);
+  finalY += 5;
+  
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(7);
+  doc.text("OBS: Em caso de haver novidades devera ser elaborado parte e FCD a respeito.", 15, finalY);
+  finalY += 5;
+  
+  const legalText = "Obs: De acordo com o artigo 16 e 31; o Caput do artigo 58 e 60, todos da I-23 PM e OS Nº DFP 001/221.1/98, de 17 de março de 1998, somente a seção de B4 está autorizada a fazer quaisquer alterações nesta Lista de Materiais, mediante prévia solicitação.";
+  const splitLegal = doc.splitTextToSize(legalText, 180);
+  doc.text(splitLegal, 15, finalY);
 
   if (isPreview) {
     const string = doc.output('bloburl');
@@ -151,14 +189,14 @@ export const generateSummaryPDF = (checks: InventoryCheck[], viaturas: Viatura[]
     const vtr = viaturas.find(v => v.id === check.viaturaId);
     const hasCN = check.entries.some(e => e.status === 'CN');
     
-    // USA LÓGICA DE TURNO PARA RECALCULAR DATA E COR
+    // USA LÓGICA DE TURNO PARA RECALCULAR DATA E COR PARA FIDELIDADE
     const shiftDate = getShiftReferenceDate(check.timestamp);
     const shiftInfo = getProntidaoInfo(new Date(check.timestamp));
 
     return [
-      formatFullDate(shiftDate),
+      formatDateShort(shiftDate),
       vtr ? vtr.prefix : '?',
-      shiftInfo.label,
+      shiftInfo.label.toUpperCase(),
       check.commanderName,
       hasCN ? 'COM NOVIDADES' : 'SEM NOVIDADES'
     ];
@@ -166,7 +204,7 @@ export const generateSummaryPDF = (checks: InventoryCheck[], viaturas: Viatura[]
 
   (doc as any).autoTable({
     startY: 25,
-    head: [['Data Operacional', 'Viatura', 'Prontidão', 'Comandante', 'Status']],
+    head: [['Data Turno', 'Viatura', 'Prontidão', 'Comandante', 'Status']],
     body: tableData,
     theme: 'striped',
     headStyles: { fillColor: themeColor, fontSize: 9 },
@@ -201,7 +239,6 @@ export const generateMonthlyFulfillmentPDF = (checks: InventoryCheck[], viaturas
         const row = [v.prefix, v.status];
         for (let d = 1; d <= daysInMonth; d++) {
             const dateStr = `${year}-${month.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
-            // Busca pelo turno operacional para fidelidade do relatório
             const check = checks.find(c => c.viaturaId === v.id && getShiftReferenceDate(c.timestamp) === dateStr);
             if (check) {
                 const hasCN = check.entries.some(e => e.status === 'CN');
@@ -234,11 +271,9 @@ export const generateMonthlyFulfillmentPDF = (checks: InventoryCheck[], viaturas
               const check = checks.find(c => c.viaturaId === checkRow.id && getShiftReferenceDate(c.timestamp) === dateStr);
               
               if (check) {
-                  // RECALCULA A COR DA PRONTIDÃO PELO TIMESTAMP
                   const shiftInfo = getProntidaoInfo(new Date(check.timestamp));
                   if (shiftInfo) {
                       const rgb = hexToRgb(shiftInfo.hex);
-                      // Fundo suave da cor do turno para fidelidade
                       data.cell.styles.fillColor = [
                         Math.min(255, rgb[0] + 230),
                         Math.min(255, rgb[1] + 230),
@@ -304,7 +339,7 @@ export const generateNewsReportPDF = (checks: InventoryCheck[], viaturas: Viatur
 
   (doc as any).autoTable({
     startY: 25,
-    head: [['Data Operacional', 'Viatura', 'Material', 'Status', 'Descrição da Novidade']],
+    head: [['Data Turno', 'Viatura', 'Material', 'Status', 'Descrição da Novidade']],
     body: newsData,
     theme: 'grid',
     headStyles: { fillColor: themeColor, fontSize: 9 },
@@ -399,7 +434,6 @@ export const generateVtrMonthlyItemsPDF = (checks: InventoryCheck[], viatura: Vi
               const dateStr = `${monthYear}-${dayIndex.toString().padStart(2, '0')}`;
               const check = checks.find(c => c.viaturaId === viatura.id && getShiftReferenceDate(c.timestamp) === dateStr);
               if (check) {
-                  // RECALCULA A COR DA PRONTIDÃO PELO TIMESTAMP
                   const shiftInfo = getProntidaoInfo(new Date(check.timestamp));
                   if (shiftInfo) {
                       const rgb = hexToRgb(shiftInfo.hex);
