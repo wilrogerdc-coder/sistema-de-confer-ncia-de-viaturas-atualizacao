@@ -16,15 +16,14 @@ export type ScopeLevel = 'GLOBAL' | 'GB' | 'SGB' | 'POSTO';
 export type PermissionKey = 
   | 'view_dashboard' 
   | 'perform_checklist' 
-  | 'manage_fleet' // Criar/Editar/Excluir Viaturas
+  | 'manage_fleet' 
   | 'view_reports' 
   | 'manage_users' 
   | 'manage_hierarchy' 
   | 'view_audit_logs' 
   | 'manage_database' 
   | 'manage_parameters'
-  | 'manage_themes'
-  | 'manage_notices'; // Nova permissão
+  | 'manage_themes';
 
 export interface GB {
   id: string;
@@ -41,7 +40,8 @@ export interface Posto {
   id: string;
   subId: string;
   name: string;
-  classification?: string; // Ex: "Pelotão", "Posto", "Base", "Estação"
+  municipio: string; // Município vinculado ao posto para relatórios
+  classification?: string; // Posto, Pelotão, etc.
 }
 
 export interface User {
@@ -51,13 +51,11 @@ export interface User {
   email?: string;
   role: UserRole;
   password?: string;
-  postoId?: string; // Mantido para retrocompatibilidade, mas o sistema usará scopeId
+  postoId?: string;
   mustChangePassword?: boolean;
-  
-  // Novos campos de controle
   scopeLevel?: ScopeLevel;
-  scopeId?: string; // ID do GB, SGB ou Posto
-  customPermissions?: PermissionKey[]; // Permissões adicionais específicas do usuário
+  scopeId?: string;
+  customPermissions?: PermissionKey[];
 }
 
 export interface MaterialItem {
@@ -85,6 +83,12 @@ export interface CheckEntry {
   observation?: string;
 }
 
+export interface HeaderConfig {
+  secretaria: string;
+  policiaMilitar: string;
+  corpoBombeiros: string;
+}
+
 export interface InventoryCheck {
   id: string;
   viaturaId: string;
@@ -96,12 +100,16 @@ export interface InventoryCheck {
   timestamp: string;
   justification?: string;
   headerDetails: {
-    unidade: string;
-    subgrupamento: string;
-    pelotao: string;
-    cidade: string;
+    secretaria: string;
+    policiaMilitar: string;
+    corpoBombeiros: string;
+    unidade: string; // Nome do GB
+    subgrupamento: string; // Nome do SGB
+    pelotao: string; // Nome do Posto
+    cidade: string; // Município do Posto
   };
   snapshot?: MaterialItem[];
+  viaturaStatusAtTime?: ViaturaStatus;
 }
 
 export interface LogEntry {
@@ -111,17 +119,6 @@ export interface LogEntry {
   action: string;
   details: string;
   timestamp: string;
-}
-
-export interface Notice {
-  id: string;
-  title: string;
-  content: string;
-  priority: 'NORMAL' | 'ALTA' | 'URGENTE';
-  active: boolean;
-  expirationDate?: string; // Data limite de exibição (YYYY-MM-DD) ou undefined/null para indeterminado
-  createdAt: string;
-  createdBy: string;
 }
 
 export enum ProntidaoColor {
@@ -140,13 +137,11 @@ export interface Theme {
   id: string;
   name: string;
   colors: {
-    primary: string;   // Cor de destaque (botões, ativos) - ex: Red-600
-    secondary: string; // Cor de fundo lateral/dark - ex: Slate-900
-    background: string; // Cor de fundo da página - ex: Slate-50
-    surface: string;    // Cor dos cards - ex: White
-    textMain: string;   // Texto principal
-    
-    // Cores de Prontidão Personalizáveis
+    primary: string;
+    secondary: string;
+    background: string;
+    surface: string;
+    textMain: string;
     readinessVerde: string;
     readinessAmarela: string;
     readinessAzul: string;
@@ -156,4 +151,16 @@ export interface Theme {
 export interface SystemSettings {
   rolePermissions: RolePermissions;
   activeTheme?: Theme;
+  headerConfig?: HeaderConfig;
+}
+
+export interface Notice {
+  id: string;
+  title: string;
+  content: string;
+  priority: 'NORMAL' | 'ALTA' | 'URGENTE';
+  active: boolean;
+  expirationDate: string;
+  createdAt: string;
+  createdBy: string;
 }

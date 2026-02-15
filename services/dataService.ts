@@ -1,201 +1,136 @@
 
-import { Viatura, InventoryCheck, User, UserRole, GB, Subgrupamento, Posto, LogEntry, RolePermissions, SystemSettings, Notice } from '../types';
+import { Viatura, InventoryCheck, User, UserRole, GB, Subgrupamento, Posto, LogEntry, RolePermissions, SystemSettings } from '../types';
 import { INITIAL_VIATURAS, INITIAL_GBS, INITIAL_SUBS, INITIAL_POSTOS, DEFAULT_ROLE_PERMISSIONS, DEFAULT_THEME } from '../constants';
 
-const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbzBMjhU8e0wHEZE7bybb9urPEIYY7lMlod0Fn2VMaiZ_4t0Z_b7Ifm0RPz4MqS_gOGafA/exec';
+/**
+ * SERVIÇO DE DADOS (dataService.ts) - CAMADA DE PERSISTÊNCIA NÍVEL AVANÇADO
+ * Gerencia a comunicação entre o Frontend e o backend em Google Apps Script.
+ */
 
-// --- CONFIGURAÇÃO DE URLS ---
-// Cole abaixo a URL gerada na nova planilha de Auditoria/Logs entre as aspas.
-// Se preenchida, esta URL terá prioridade absoluta para logs.
-const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbxXmKSgtwU70pxm2AkhSVZS31N0Zd6UAObeA0G2U9Zx8V_lsu8UIZruyrucvA3niR2Mjw/exec'; 
+const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbzBMjhU8e0wHEZE7bybb9urPEIYY7lMlod0Fn2VMaiZ_4t0Z_b7Ifm0RPz4MqS_gOGafA/exec';
+const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbzrfHg2aBDIVs0SP6EBdyU5mopFHwMMLWK_wPEQg9NCSyH5ddwuRvOZNp7GsEUSmtKp/exec'; 
 
 const STORAGE_KEY_CACHE = 'vtr_system_cache_v1.7';
 const STORAGE_KEY_CONFIG = 'vtr_db_config_v1';
 
-type DataType = 'GB' | 'SUB' | 'POSTO' | 'VIATURA' | 'CHECK' | 'USER' | 'SETUP' | 'CLEAR_ALL' | 'LOG' | 'SETTINGS' | 'NOTICE';
+type DataType = 'GB' | 'SUB' | 'POSTO' | 'VIATURA' | 'CHECK' | 'USER' | 'SETUP' | 'CLEAR_ALL' | 'LOG' | 'SETTINGS';
 
 let pendingFetch: Promise<any> | null = null;
 
+/**
+ * Utilitário para conversão de strings JSON vindas da planilha em objetos JavaScript.
+ */
 const ensureParsed = (val: any, fallback: any = []) => {
+  if (val === null || val === undefined) return fallback;
   if (typeof val === 'string') {
     try {
-      if (val.trim() === '' || val === 'undefined') return fallback;
-      return JSON.parse(val);
+      if (val.trim() === '' || val === 'undefined' || val === 'null') return fallback;
+      const parsed = JSON.parse(val);
+      return (typeof parsed === 'object' && parsed !== null) ? parsed : fallback;
     } catch (e) {
-      console.warn('Falha ao parsear valor JSON:', val);
       return fallback;
     }
   }
-  return val || fallback;
+  return (typeof val === 'object' && val !== null) ? val : fallback;
 };
 
-// Helper para gerenciar URLs
 const getDbConfig = () => {
-  let config = {
-    operationalUrl: DEFAULT_API_URL,
-    auditUrl: DEFAULT_AUDIT_URL || DEFAULT_API_URL
-  };
-
+  let config = { operationalUrl: DEFAULT_API_URL, auditUrl: DEFAULT_AUDIT_URL };
   try {
     const stored = localStorage.getItem(STORAGE_KEY_CONFIG);
     if (stored) {
         const parsed = JSON.parse(stored);
-        
-        // Banco Operacional: Prioriza LocalStorage (Configuração da Tela) > Padrão do Código
         config.operationalUrl = parsed.operationalUrl || DEFAULT_API_URL;
-        
-        // Banco Auditoria: Prioriza Padrão do Código (se preenchido) > LocalStorage > Banco Operacional
-        // Isso garante a "URL Fixa" se o desenvolvedor definir a constante acima.
-        config.auditUrl = DEFAULT_AUDIT_URL || parsed.auditUrl || config.operationalUrl;
+        config.auditUrl = parsed.auditUrl || DEFAULT_AUDIT_URL;
     }
-  } catch (e) {
-    console.error("Erro ao ler config de DB", e);
-  }
-  
+  } catch (e) {}
   return config;
 };
 
 export const DataService = {
-  // Retorna as configurações atuais
-  getConfig() {
-    return getDbConfig();
-  },
+  getConfig() { return getDbConfig(); },
+  saveConfig(operationalUrl: string, auditUrl: string) { localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify({ operationalUrl, auditUrl })); },
 
-  // Salva novas configurações
-  saveConfig(operationalUrl: string, auditUrl: string) {
-    localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify({ operationalUrl, auditUrl }));
-  },
-
-  // Teste de conexão genérico ou específico
   async testConnection(specificUrl?: string): Promise<{ success: boolean; latency?: number; error?: string }> {
     const urlToTest = specificUrl || getDbConfig().operationalUrl;
     const start = Date.now();
     try {
-      const response = await fetch(`${urlToTest}?t=${Date.now()}`, { 
-        method: 'GET', 
-        cache: 'no-store',
-        mode: 'cors'
-      });
-      
+      const response = await fetch(`${urlToTest}?t=${Date.now()}`, { method: 'GET', cache: 'no-store' });
       if (!response.ok) return { success: false, error: `Erro HTTP ${response.status}` };
-      
-      await response.json(); // Consome o corpo para garantir
+      await response.json();
       return { success: true, latency: Date.now() - start };
     } catch (e: any) {
-      return { success: false, error: 'Falha ao acessar API Google Script.' };
+      return { success: false, error: 'Falha ao acessar API.' };
     }
   },
 
-  async setupSpreadsheet(): Promise<void> {
-    await this.sendToCloud('SETUP', 'SAVE', { setup: true });
-  },
-
-  async clearDatabase(): Promise<void> {
-    await this.sendToCloud('CLEAR_ALL', 'DELETE', { confirm: true });
-    localStorage.removeItem(STORAGE_KEY_CACHE);
-  },
+  async setupSpreadsheet(): Promise<void> { await this.sendToCloud('SETUP', 'SAVE', { setup: true }); },
+  async clearDatabase(): Promise<void> { await this.sendToCloud('CLEAR_ALL', 'DELETE', { confirm: true }); localStorage.removeItem(STORAGE_KEY_CACHE); },
 
   async fetchAllData(forceRefresh = false): Promise<any> {
     if (!forceRefresh && pendingFetch) return pendingFetch;
-
     const { operationalUrl } = getDbConfig();
-
     pendingFetch = (async () => {
       try {
-        if (!forceRefresh) {
-            const cache = localStorage.getItem(STORAGE_KEY_CACHE);
-            if (cache) {
-                // Cache logic... (poderia retornar cache aqui se implementado validade)
-            }
-        }
-
-        const response = await fetch(`${operationalUrl}?t=${Date.now()}`, { 
-          method: 'GET', 
-          cache: 'no-store',
-          mode: 'cors'
-        });
+        const response = await fetch(`${operationalUrl}?t=${Date.now()}`, { method: 'GET', cache: 'no-store' });
         if (!response.ok) throw new Error('Falha na rede');
         const data = await response.json();
-        if (data) {
-          localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(data));
-        }
+        if (data) localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(data));
         return data;
       } catch (e) {
-        console.warn("Usando cache local devido a erro de rede:", e);
         const cache = localStorage.getItem(STORAGE_KEY_CACHE);
         return cache ? JSON.parse(cache) : null;
-      } finally {
-        pendingFetch = null;
-      }
+      } finally { pendingFetch = null; }
     })();
-
     return pendingFetch;
   },
 
   async sendToCloud(type: DataType, action: 'SAVE' | 'DELETE', payload: any): Promise<void> {
     const { operationalUrl, auditUrl } = getDbConfig();
-    // Direciona LOGs para a URL de Auditoria, todo o resto para Operacional
     const targetUrl = type === 'LOG' ? auditUrl : operationalUrl;
-
     try {
       const body = JSON.stringify({ type, action, ...payload });
-      await fetch(targetUrl, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
-        body: body
-      });
-      
-      const waitTime = action === 'DELETE' ? 3000 : 2000;
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-    } catch (e) {
-      console.error(`Erro ao sincronizar ${type}:`, e);
-      throw e;
+      await fetch(targetUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      await new Promise(resolve => setTimeout(resolve, 300));
+    } catch (e) { 
+      console.error(`Erro ao enviar ${type}:`, e);
+      throw e; 
     }
   },
 
   async saveLog(log: Omit<LogEntry, 'id' | 'timestamp'>): Promise<void> {
-    const entry: LogEntry = {
-      id: Math.random().toString(36).substr(2, 9),
-      timestamp: new Date().toISOString(),
-      ...log
+    const { auditUrl } = getDbConfig();
+    const entry = {
+        id: Math.random().toString(36).substr(2, 9),
+        timestamp: new Date().toISOString(),
+        userName: log.userName,
+        acao: log.action,
+        detalhes: log.details
     };
-    await this.sendToCloud('LOG', 'SAVE', entry);
+    try {
+      const body = JSON.stringify({ type: 'LOG', action: 'SAVE', ...entry });
+      await fetch(auditUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    } catch (e) {}
   },
 
   async getLogs(): Promise<LogEntry[]> {
-    const { operationalUrl, auditUrl } = getDbConfig();
-    
-    // Função auxiliar para processar o retorno, garantindo array
-    const processLogData = (data: any) => {
-        if (!data) return [];
-        // Verifica variações de nome da chave e garante o parse do JSON stringificado se necessário
-        const rawLogs = data.logs || data.log || data.LOGS;
-        return ensureParsed(rawLogs, []);
-    };
-
-    // Se as URLs forem iguais, os logs vêm junto com o fetchAllData (comportamento legado)
-    if (operationalUrl === auditUrl) {
-        const data = await this.fetchAllData();
-        return processLogData(data);
-    }
-
-    // Se forem diferentes, faz fetch específico no endpoint de auditoria
+    const { auditUrl } = getDbConfig();
     try {
-        const response = await fetch(`${auditUrl}?type=LOGS&t=${Date.now()}`, { 
-            method: 'GET', 
-            cache: 'no-store',
-            mode: 'cors'
-        });
+        const response = await fetch(`${auditUrl}?type=LOGS&t=${Date.now()}`, { method: 'GET', cache: 'no-store' });
         if (response.ok) {
             const data = await response.json();
-            return processLogData(data);
+            const rawList = Array.isArray(data) ? data : (data.data || []);
+            return rawList.map((l: any) => ({
+                id: l.id || l.timestamp,
+                userId: l.userId || '',
+                userName: l.operador || l.userName || 'Sistema',
+                action: l.acao || l.logAction || 'INFO',
+                details: l.detalhes || l.details || '-',
+                timestamp: l.timestamp || l.data || new Date().toISOString()
+            }));
         }
-        return [];
-    } catch (e) {
-        console.warn("Erro ao buscar logs do endpoint de auditoria:", e);
-        return [];
-    }
+    } catch (e) {}
+    return [];
   },
 
   async getGBS(): Promise<GB[]> {
@@ -214,143 +149,99 @@ export const DataService = {
 
   async getPostos(): Promise<Posto[]> {
     const data = await this.fetchAllData();
-    return (data?.postos && data.postos.length > 0) ? data.postos : INITIAL_POSTOS;
+    const rawPostos = data?.postos || [];
+    return rawPostos.length > 0 ? rawPostos : INITIAL_POSTOS;
   },
-  async savePosto(posto: Posto) { await this.sendToCloud('POSTO', 'SAVE', posto); },
+  
+  /**
+   * Salva Unidade/Posto no banco de dados operacional.
+   * IMPORTANTE: Inclui o campo 'municipio' para relatórios.
+   */
+  async savePosto(posto: Posto) { 
+    await this.sendToCloud('POSTO', 'SAVE', {
+      id: posto.id,
+      subId: posto.subId,
+      name: posto.name,
+      classification: posto.classification,
+      municipio: posto.municipio || '' // Persiste explicitamente o município
+    }); 
+  },
+  
   async deletePosto(id: string) { await this.sendToCloud('POSTO', 'DELETE', { id }); },
 
   async getViaturas(): Promise<Viatura[]> {
     const data = await this.fetchAllData();
     const cloudVtrs = data?.viaturas || [];
-    
     if (cloudVtrs.length === 0) return INITIAL_VIATURAS;
-
-    const allVtrs = [...INITIAL_VIATURAS];
-    
-    const processedCloudVtrs = cloudVtrs.map((v: any) => ({
-      ...v,
-      items: ensureParsed(v.items, []),
-      status: v.status || 'OPERANDO'
-    }));
-
-    processedCloudVtrs.forEach((cv: Viatura) => {
-      const idx = allVtrs.findIndex(v => v.id === cv.id);
-      if (idx > -1) {
-        allVtrs[idx] = cv; 
-      } else {
-        allVtrs.push(cv); 
-      }
-    });
-    return allVtrs;
+    return cloudVtrs.map((v: any) => ({ ...v, items: ensureParsed(v.items, []) }));
   },
-  async saveViatura(viatura: Viatura) { await this.sendToCloud('VIATURA', 'SAVE', viatura); },
+  async saveViatura(viatura: Viatura) { 
+    const payload = { ...viatura, items: JSON.stringify(viatura.items) };
+    await this.sendToCloud('VIATURA', 'SAVE', payload); 
+  },
   async deleteViatura(id: string) { await this.sendToCloud('VIATURA', 'DELETE', { id }); },
 
   async getChecks(): Promise<InventoryCheck[]> {
     const data = await this.fetchAllData();
     const rawChecks = data?.checks || [];
-    
-    return rawChecks.map((c: any) => ({
-      ...c,
-      entries: ensureParsed(c.entries, []),
-      responsibleNames: ensureParsed(c.responsibleNames, []),
-      headerDetails: ensureParsed(c.headerDetails, {
-        unidade: '', subgrupamento: '', pelotao: '', cidade: ''
-      })
+    return rawChecks.map((c: any) => ({ 
+        ...c, 
+        entries: ensureParsed(c.entries, []), 
+        responsibleNames: ensureParsed(c.responsibleNames, []), 
+        headerDetails: ensureParsed(c.headerDetails, null), 
+        snapshot: ensureParsed(c.snapshot, [])
     }));
   },
-  async saveCheck(check: InventoryCheck) { await this.sendToCloud('CHECK', 'SAVE', check); },
+
+  /**
+   * Salva conferência de viatura.
+   * Converte o objeto de cabeçalho em string JSON para gravação estável na planilha.
+   */
+  async saveCheck(check: InventoryCheck) { 
+    const payload = {
+      ...check,
+      entries: JSON.stringify(check.entries),
+      responsibleNames: JSON.stringify(check.responsibleNames),
+      headerDetails: JSON.stringify(check.headerDetails),
+      snapshot: JSON.stringify(check.snapshot || [])
+    };
+    await this.sendToCloud('CHECK', 'SAVE', payload); 
+  },
 
   async getUsers(forceRefresh = false): Promise<User[]> {
     const data = await this.fetchAllData(forceRefresh);
     const masterUsers: User[] = [
       { id: 'master-1', username: 'admin20gb', name: 'Administrador 20GB', role: UserRole.ADMIN, password: 'admin20gb', scopeLevel: 'GLOBAL' },
-      { id: 'master-2', username: 'Cavalieri', name: 'Super Usuário Cavalieri', role: UserRole.SUPER, password: 'tricolor', scopeLevel: 'GLOBAL' }
+      { id: 'master-2', username: 'cavalieri', name: 'Super Usuário Cavalieri', role: UserRole.SUPER, password: 'tricolor', scopeLevel: 'GLOBAL' }
     ];
-    
     const cloudUsers: any[] = data?.users || [];
-    const processedUsers = cloudUsers.map(u => ({
-      ...u,
-      customPermissions: ensureParsed(u.customPermissions, [])
-    }));
-
+    const processedUsers = cloudUsers.map(u => ({ ...u, customPermissions: ensureParsed(u.customPermissions, []) }));
     const finalUsers = [...processedUsers];
-    
-    masterUsers.forEach(m => {
-      if (!finalUsers.some(u => u.username === m.username)) {
-        finalUsers.push(m);
-      }
-    });
-
+    masterUsers.forEach(m => { if (!finalUsers.some(u => u.username.toLowerCase() === m.username.toLowerCase())) finalUsers.push(m); });
     return finalUsers;
   },
   async saveUser(user: User) { 
-    if (['Cavalieri', 'admin20gb'].includes(user.username)) return;
-    await this.sendToCloud('USER', 'SAVE', user); 
+    if (['cavalieri', 'admin20gb'].includes(user.username.toLowerCase())) return; 
+    const payload = { ...user, customPermissions: JSON.stringify(user.customPermissions || []) };
+    await this.sendToCloud('USER', 'SAVE', payload); 
   },
-  async deleteUser(id: string) { 
-    await this.sendToCloud('USER', 'DELETE', { id }); 
-  },
+  async deleteUser(id: string) { await this.sendToCloud('USER', 'DELETE', { id }); },
 
   async getSettings(): Promise<SystemSettings> {
     const data = await this.fetchAllData();
-    const loadedSettings = data?.settings;
-    
-    const parsed = ensureParsed(loadedSettings, { rolePermissions: DEFAULT_ROLE_PERMISSIONS });
-    
-    if (parsed[UserRole.USER] && !parsed.rolePermissions) {
-        return {
-            rolePermissions: parsed,
-            activeTheme: DEFAULT_THEME
-        };
-    }
-
+    const loadedSettings = data?.settings || {};
     return {
-        rolePermissions: parsed.rolePermissions || DEFAULT_ROLE_PERMISSIONS,
-        activeTheme: parsed.activeTheme || DEFAULT_THEME
+      rolePermissions: ensureParsed(loadedSettings.rolePermissions, DEFAULT_ROLE_PERMISSIONS),
+      activeTheme: ensureParsed(loadedSettings.activeTheme, DEFAULT_THEME),
+      headerConfig: ensureParsed(loadedSettings.headerConfig, null)
     };
   },
-
-  async saveSettings(settings: SystemSettings) {
-    await this.sendToCloud('SETTINGS', 'SAVE', settings);
-  },
-
-  // --- MÉTODOS DE AVISOS (NOTICES) ---
-  async getNotices(): Promise<Notice[]> {
-    const data = await this.fetchAllData();
-    const rawNotices = data?.notices || data?.notice || data?.NOTICES || [];
-    
-    return rawNotices.map((n: any) => {
-      // Limpeza robusta da data de validade
-      let cleanExpirationDate = undefined;
-      if (n.expirationDate) {
-        // Pega apenas os primeiros 10 chars (YYYY-MM-DD) independente do que vier depois
-        const strVal = String(n.expirationDate).trim();
-        if (strVal.length >= 10) {
-          cleanExpirationDate = strVal.substring(0, 10);
-        }
-      }
-
-      // Lógica de "Active": Padrão TRUE se undefined/null, senão processa string/bool
-      let isActive = true;
-      if (n.active !== undefined && n.active !== null) {
-        isActive = typeof n.active === 'string' ? n.active.toLowerCase() === 'true' : !!n.active;
-      }
-
-      return {
-        ...n,
-        active: isActive,
-        priority: ['NORMAL', 'ALTA', 'URGENTE'].includes(n.priority) ? n.priority : 'NORMAL',
-        expirationDate: cleanExpirationDate
-      };
-    });
-  },
-
-  async saveNotice(notice: Notice): Promise<void> {
-    await this.sendToCloud('NOTICE', 'SAVE', notice);
-  },
-
-  async deleteNotice(id: string): Promise<void> {
-    await this.sendToCloud('NOTICE', 'DELETE', { id });
+  async saveSettings(settings: SystemSettings) { 
+    const payload = {
+      rolePermissions: JSON.stringify(settings.rolePermissions),
+      activeTheme: JSON.stringify(settings.activeTheme),
+      headerConfig: JSON.stringify(settings.headerConfig)
+    };
+    await this.sendToCloud('SETTINGS', 'SAVE', payload); 
   }
 };

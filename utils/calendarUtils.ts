@@ -9,7 +9,7 @@ import { PRONTIDAO_CYCLE } from '../constants';
  * Sequência: VERDE -> AMARELA -> AZUL
  */
 export const getProntidaoInfo = (date: Date) => {
-  // Criar data base usando componentes locais para evitar erros de timezone (UTC)
+  // Criar data base usando componentes locais para garantir precisão de fuso horário
   const baseDate = new Date(2026, 0, 1, 7, 30, 0, 0);
   
   const checkDate = new Date(date);
@@ -24,7 +24,7 @@ export const getProntidaoInfo = (date: Date) => {
   }
   shiftStartDate.setHours(7, 30, 0, 0);
 
-  // Calcula a diferença em dias inteiros considerando o horário local
+  // Calcula a diferença em dias considerando o horário local
   const diffInMs = shiftStartDate.getTime() - baseDate.getTime();
   const diffInDays = Math.round(diffInMs / (1000 * 60 * 60 * 24));
   
@@ -36,14 +36,12 @@ export const getProntidaoInfo = (date: Date) => {
 /**
  * Retorna a Data de Referência Operacional (Shift Date)
  * Baseado no turno de 24h que inicia as 07:30.
- * Ex: 02/01/2026 as 05:00 pertence ao turno do dia 01/01/2026.
  */
 export const getShiftReferenceDate = (date: Date | string): string => {
   const d = new Date(date);
   const hour = d.getHours();
   const minute = d.getMinutes();
   
-  // Se for antes das 07:30, retrocede um dia para o dia que iniciou o turno
   if (hour < 7 || (hour === 7 && minute < 30)) {
     d.setDate(d.getDate() - 1);
   }
@@ -54,19 +52,12 @@ export const getShiftReferenceDate = (date: Date | string): string => {
   return `${year}-${month}-${day}`;
 };
 
-/**
- * Helper para limpar strings de data (remove parte de tempo ISO se existir)
- */
 export const safeDateIso = (dateStr: string): string => {
   if (!dateStr) return '';
   if (dateStr.includes('T')) return dateStr.split('T')[0];
   return dateStr;
 };
 
-/**
- * Retorna a data de hoje no formato YYYY-MM-DD baseada no horário local do cliente.
- * Essencial para comparações de data consistentes (evita problemas de UTC).
- */
 export const getLocalTodayISO = () => {
   const now = new Date();
   const year = now.getFullYear();
@@ -75,44 +66,26 @@ export const getLocalTodayISO = () => {
   return `${year}-${month}-${day}`;
 };
 
-/**
- * Verifica se um aviso expirou comparando a data de validade com a data de hoje local.
- * Retorna TRUE se expirado (data validade < hoje).
- * Retorna FALSE se válido (data validade >= hoje) ou se for indeterminado.
- */
 export const isNoticeExpired = (expirationDate?: string): boolean => {
-  if (!expirationDate) return false; // Sem data = Indeterminado (Válido)
-  
+  if (!expirationDate) return false;
   const cleanExp = safeDateIso(expirationDate);
   if (!cleanExp || cleanExp.trim() === '') return false;
-
   const today = getLocalTodayISO();
-  
-  // Comparação léxica de strings ISO (YYYY-MM-DD) funciona corretamente
   return cleanExp < today;
 };
 
-/**
- * Formata uma data (Date object ou string YYYY-MM-DD) para formato legível PT-BR.
- */
 export const formatFullDate = (dateInput: Date | string) => {
   try {
     let dateObj: Date;
-
     if (typeof dateInput === 'string') {
       const cleanDate = safeDateIso(dateInput);
       const [y, m, d] = cleanDate.split('-').map(Number);
-      
       if (!y || !m || !d) return 'Data Inválida';
-
-      // Cria data local meio-dia para segurança
       dateObj = new Date(y, m - 1, d, 12, 0, 0);
     } else {
       dateObj = dateInput;
     }
-
     if (isNaN(dateObj.getTime())) return 'Data Inválida';
-
     return new Intl.DateTimeFormat('pt-BR', {
       day: '2-digit',
       month: 'long',
@@ -129,7 +102,6 @@ export const formatDateShort = (dateInput: string) => {
     const cleanDate = safeDateIso(dateInput);
     const parts = cleanDate.split('-');
     if (parts.length !== 3) return dateInput; 
-
     const [y, m, d] = parts.map(Number);
     return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
   } catch (e) {

@@ -1,5 +1,5 @@
 
-import { Viatura, ProntidaoColor, GB, Subgrupamento, Posto, ViaturaStatus, RolePermissions, UserRole, Theme } from './types';
+import { Viatura, ProntidaoColor, GB, Subgrupamento, Posto, ViaturaStatus, RolePermissions, UserRole, Theme, HeaderConfig } from './types';
 
 export const PRONTIDAO_CYCLE = [
   { color: ProntidaoColor.VERDE, label: 'Verde', hex: '#22c55e' },
@@ -9,17 +9,22 @@ export const PRONTIDAO_CYCLE = [
 
 export const INITIAL_GBS: GB[] = [{ id: 'gb1', name: '20º Grupamento de Bombeiros' }];
 export const INITIAL_SUBS: Subgrupamento[] = [{ id: 'sub1', gbId: 'gb1', name: '1º Subgrupamento de Bombeiros' }];
-export const INITIAL_POSTOS: Posto[] = [{ id: 'posto1', subId: 'sub1', name: 'Pelotão de Bombeiros de Birigui' }];
+export const INITIAL_POSTOS: Posto[] = [{ id: 'posto1', subId: 'sub1', name: 'Pelotão de Bombeiros de Birigui', municipio: 'Birigui', classification: 'Pelotão' }];
 
 export const RESET_MASTER_TOKEN = "20GB-BOMBEIROS-RESET";
 
-// Matriz de Permissões Padrão (Fallback)
+export const DEFAULT_HEADER_CONFIG: HeaderConfig = {
+  secretaria: "SECRETARIA DA SEGURANÇA PÚBLICA",
+  policiaMilitar: "POLÍCIA MILITAR DO ESTADO DE SÃO PAULO",
+  corpoBombeiros: "CORPO DE BOMBEIROS DO ESTADO DE SÃO PAULO"
+};
+
 export const DEFAULT_ROLE_PERMISSIONS: RolePermissions = {
   [UserRole.USER]: ['view_dashboard', 'perform_checklist'],
-  [UserRole.ADMIN]: ['view_dashboard', 'perform_checklist', 'view_reports', 'manage_fleet', 'manage_users', 'manage_notices'],
+  [UserRole.ADMIN]: ['view_dashboard', 'perform_checklist', 'view_reports', 'manage_fleet', 'manage_users'],
   [UserRole.SUPER]: [
     'view_dashboard', 'perform_checklist', 'manage_fleet', 'view_reports', 
-    'manage_users', 'manage_hierarchy', 'view_audit_logs', 'manage_database', 'manage_parameters', 'manage_themes', 'manage_notices'
+    'manage_users', 'manage_hierarchy', 'view_audit_logs', 'manage_database', 'manage_parameters', 'manage_themes'
   ]
 };
 
@@ -33,8 +38,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'view_audit_logs': 'Auditoria e Logs',
   'manage_database': 'Banco de Dados (Backup/Reset)',
   'manage_parameters': 'Parâmetros do Sistema',
-  'manage_themes': 'Gerenciar Temas',
-  'manage_notices': 'Gerenciar Avisos (Mural)'
+  'manage_themes': 'Gerenciar Temas'
 };
 
 export const THEME_PRESETS: Theme[] = [
@@ -42,9 +46,9 @@ export const THEME_PRESETS: Theme[] = [
     id: 'modern',
     name: 'Moderno (Padrão)',
     colors: {
-      primary: '#dc2626',   // Red-600
-      secondary: '#0f172a', // Slate-900
-      background: '#f8fafc', // Slate-50
+      primary: '#dc2626',
+      secondary: '#0f172a',
+      background: '#f8fafc',
       surface: '#ffffff',
       textMain: '#0f172a',
       readinessVerde: '#22c55e',
@@ -56,23 +60,23 @@ export const THEME_PRESETS: Theme[] = [
     id: 'professional',
     name: 'Profissional',
     colors: {
-      primary: '#2563eb',   // Blue-600
-      secondary: '#1e293b', // Slate-800
-      background: '#f1f5f9', // Slate-100
+      primary: '#2563eb',
+      secondary: '#1e293b',
+      background: '#f1f5f9',
       surface: '#ffffff',
       textMain: '#1e293b',
-      readinessVerde: '#15803d', // Verde mais sóbrio
-      readinessAmarela: '#ca8a04', // Amarelo ocre
-      readinessAzul: '#1d4ed8' // Azul forte
+      readinessVerde: '#15803d',
+      readinessAmarela: '#ca8a04',
+      readinessAzul: '#1d4ed8'
     }
   },
   {
     id: 'corporate',
     name: 'Corporativo',
     colors: {
-      primary: '#059669',   // Emerald-600
-      secondary: '#171717', // Neutral-900
-      background: '#fafafa', // Neutral-50
+      primary: '#059669',
+      secondary: '#171717',
+      background: '#fafafa',
       surface: '#ffffff',
       textMain: '#171717',
       readinessVerde: '#059669',
@@ -106,35 +110,15 @@ export const INITIAL_VIATURAS: Viatura[] = [
       { id: 'abs_12', name: 'Derivante 63mm', specification: '', quantity: 1, compartment: 'GAVETA 05' },
       { id: 'abs_13', name: 'Esguicho Tipo Pistola', specification: '38mm', quantity: 1, compartment: 'GAVETA 05' }
     ]
-  },
-  {
-    id: 'at20104',
-    name: 'Auto Tanque',
-    prefix: 'AT-20104',
-    status: ViaturaStatus.OPERANDO,
-    postoId: 'posto1',
-    items: [
-      { id: 'at_1', name: 'Calços de Madeira', specification: 'Par', quantity: 2, compartment: 'GAVETA 01' },
-      { id: 'at_2', name: 'Chave de Admissão 4"', specification: 'Latão', quantity: 2, compartment: 'GAVETA 01' },
-      { id: 'at_3', name: 'Mangueira 63mm', specification: '30 metros', quantity: 2, compartment: 'GAVETA 02' },
-      { id: 'at_4', name: 'Mangueira 38mm', specification: '15 metros', quantity: 4, compartment: 'GAVETA 02' },
-      { id: 'at_5', name: 'Esguicho Regulável 63mm', specification: '', quantity: 1, compartment: 'GAVETA 03' },
-      { id: 'at_6', name: 'Esguicho Regulável 38mm', specification: '', quantity: 1, compartment: 'GAVETA 03' },
-      { id: 'at_7', name: 'Derivante 63mm', specification: '', quantity: 1, compartment: 'GAVETA 03' },
-      { id: 'at_8', name: 'Adaptador 63mm para 38mm', specification: '', quantity: 1, compartment: 'GAVETA 03' },
-      { id: 'at_9', name: 'Mangote de Sucção 4"', specification: 'Lances', quantity: 2, compartment: 'LATERAL' },
-      { id: 'at_10', name: 'Ralo de Fundo 4"', specification: '', quantity: 1, compartment: 'TRASEIRA' },
-      { id: 'at_11', name: 'Cones de Sinalização', specification: '75cm', quantity: 6, compartment: 'GAVETA 04' },
-      { id: 'at_12', name: 'EPR Completo', specification: 'Drager/MSA', quantity: 2, compartment: 'CABINE' },
-      { id: 'at_13', name: 'Extintor de Incêndio', specification: 'PQS 6kg', quantity: 1, compartment: 'LATERAL' },
-      { id: 'at_14', name: 'Rádio Portátil (HT)', specification: 'Motorola', quantity: 1, compartment: 'CABINE' }
-    ]
   }
 ];
 
 export const APP_NAME = "Conferência de Materiais";
 
 export const DEFAULT_HEADER = {
+  secretaria: "SECRETARIA DA SEGURANÇA PÚBLICA",
+  policiaMilitar: "POLÍCIA MILITAR DO ESTADO DE SÃO PAULO",
+  corpoBombeiros: "CORPO DE BOMBEIROS DO ESTADO DE SÃO PAULO",
   unidade: "20º GRUPAMENTO DE BOMBEIROS",
   subgrupamento: "1º SUBGRUPAMENTO DE BOMBEIROS",
   pelotao: "PELOTÃO DE BOMBEIROS DE BIRIGUI",
