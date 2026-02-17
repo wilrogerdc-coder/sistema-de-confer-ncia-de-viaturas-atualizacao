@@ -1,242 +1,189 @@
 
 import { InventoryCheck, Viatura, CheckEntry, ViaturaStatus, LogEntry, Posto } from '../types';
-import { formatFullDate, safeDateIso, getShiftReferenceDate, formatDateShort, getProntidaoInfo } from './calendarUtils';
+import { formatFullDate, getShiftReferenceDate, formatDateShort, getProntidaoInfo, getDaysInMonth } from './calendarUtils';
 import { PRONTIDAO_CYCLE, DEFAULT_HEADER } from '../constants';
 
 /**
- * UTILS: GERADOR DE PDF (pdfGenerator.ts) - VERSÃO ENGENHARIA AVANÇADA V2.7
- * Foco: Fidelidade institucional, correção de hierarquia e numeração de páginas.
+ * MOTOR DE RELATÓRIOS PDF (NÍVEL SÊNIOR)
+ * Implementa fidelidade documental militar com colunas simétricas e assinaturas verticais.
  */
 
 const getJsPDF = () => {
   const w = window as any;
-  let jsPDFConstructor = w.jspdf?.jsPDF || w.jsPDF;
-  if (!jsPDFConstructor) {
-    throw new Error("Biblioteca jsPDF não localizada no escopo global.");
+  const JsPDF = w.jspdf?.jsPDF || w.jsPDF;
+  if (!JsPDF) {
+    alert("Erro crítico: A biblioteca de geração de PDF não carregou. Recarregue a página.");
+    throw new Error("jsPDF missing");
   }
-  return jsPDFConstructor;
+  return JsPDF;
 };
 
-/**
- * Utilitário para garantir caixa alta segura em strings.
- */
-const safeUpper = (val: any): string => {
-  if (val === null || val === undefined) return '';
-  return String(val).toUpperCase();
-};
+const safeUpper = (val: any): string => String(val || '').toUpperCase();
 
-/**
- * Conversão de Hex para RGB para compatibilidade jsPDF.
- */
 const hexToRgb = (hex: string): [number, number, number] => {
-  const bigint = parseInt(hex.slice(1), 16);
+  const h = hex.replace('#', '');
+  const bigint = parseInt(h, 16);
   return [(bigint >> 16) & 255, (bigint >> 8) & 255, bigint & 255];
 };
 
-/**
- * ADICIONA NUMERAÇÃO DE PÁGINAS EM TODOS OS RELATÓRIOS
- * Posiciona o contador no rodapé centralizado em todas as páginas do documento.
- */
 const addPageNumbers = (doc: any) => {
   const pageCount = doc.internal.getNumberOfPages();
   const pageWidth = doc.internal.pageSize.width;
   const pageHeight = doc.internal.pageSize.height;
-  
-  doc.setFont('helvetica', 'italic');
   doc.setFontSize(7);
   doc.setTextColor(150, 150, 150);
-  
+  doc.setFont('helvetica', 'italic');
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    doc.text(`Sistema SiscoV • Página ${i} de ${pageCount}`, pageWidth / 2, pageHeight - 8, { align: 'center' });
+    // Alteração: Removida a frase "Desenvolvido por Cavalieri - 2026"
+    doc.text(`Página ${i} de ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
   }
 };
 
-export const getHistoricalVtrStatus = (vtr: Viatura, dateStr: string, checks: InventoryCheck[]) => {
-    const dayCheck = checks.find(c => c.viaturaId === vtr.id && getShiftReferenceDate(c.timestamp) === dateStr);
-    if (dayCheck && dayCheck.viaturaStatusAtTime) return dayCheck.viaturaStatusAtTime;
-    return vtr.status;
-};
-
 /**
- * RELATÓRIO 1: ESPELHO DE CONFERÊNCIA INDIVIDUAL (HISTÓRICO)
- * REESTRUTURADO: 7 Linhas de cabeçalho com dados fixos e dinâmicos.
+ * RELATÓRIO 1: ESPELHO INDIVIDUAL DE CONFERÊNCIA REALIZADA
  */
 export const generateInventoryPDF = (check: InventoryCheck, viatura: Viatura, isPreview: boolean = false) => {
   const JsPDF = getJsPDF();
   const doc = new JsPDF();
-  
-  // Recupera o cabeçalho gravado no momento do checklist (ou padrão caso legado)
   const header = check.headerDetails || DEFAULT_HEADER;
-  const shiftInfo = getProntidaoInfo(new Date(check.timestamp));
-  const rgb = hexToRgb(shiftInfo.hex);
-  const shiftDateStr = getShiftReferenceDate(check.timestamp);
+  const shiftInfo = getProntidaoInfo(check.timestamp);
+  
+  // Lógica de Cores por Status (BX = Vermelho, RS = Laranja)
+  let rgb = hexToRgb(shiftInfo.hex);
+  if (check.viaturaStatusAtTime === ViaturaStatus.BAIXADA) {
+    rgb = [185, 28, 28]; // Red-700
+  } else if (check.viaturaStatusAtTime === ViaturaStatus.RESERVA) {
+    rgb = [234, 88, 12]; // Orange-600
+  }
 
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal'); 
-  let startY = 10;
+  doc.setFont('helvetica', 'bold'); 
+  let startY = 15;
   
-  // --- CONSTRUÇÃO DO CABEÇALHO OFICIAL (7 LINHAS) ---
-  const headerLines = [
-    header.secretaria,       // Linha 1: SSP (Padrão)
-    header.policiaMilitar,   // Linha 2: PMESP (Padrão)
-    header.corpoBombeiros,   // Linha 3: CBPMESP (Padrão)
-    header.unidade,          // Linha 4: Grupamento (GB)
-    header.subgrupamento,    // Linha 5: Subgrupamento (SGB)
-    header.pelotao           // Linha 6: Unidade Operacional (Ex: ESTAÇÃO DE BOMBEIROS JUSSARA)
-  ];
-
-  headerLines.forEach(line => {
-    if (line) {
-      doc.text(safeUpper(line), 105, startY, { align: "center" });
-      startY += 4.2;
-    }
+  [header.corpoBombeiros, header.unidade, header.subgrupamento, header.pelotao].forEach(line => {
+    doc.text(safeUpper(line), 105, startY, { align: "center" });
+    startY += 5;
   });
   
-  // Linha 7: Município e Data (Ex: BIRIGUI, 24 DE MAIO DE 2024)
-  const localidadeEData = `${safeUpper(header.cidade)}, ${safeUpper(formatFullDate(shiftDateStr))}`;
-  doc.text(localidadeEData, 105, startY, { align: "center" });
-  
-  // Título do Relatório
-  startY += 8;
+  startY += 10;
   doc.setFontSize(11);
   doc.setTextColor(rgb[0], rgb[1], rgb[2]);
-  doc.setFont('helvetica', 'bold');
-  doc.text(`CONFERÊNCIA DE MATERIAIS: ${viatura.prefix}`, 105, startY, { align: "center" });
+  doc.text(`CONFERÊNCIA DE MATERIAIS: ${safeUpper(viatura.prefix)}`, 105, startY, { align: "center" });
   
-  // Dados de Referência do Registro
   doc.setFontSize(8);
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'normal');
-  doc.text(`PRONTIDÃO: ${safeUpper(shiftInfo.label)}`, 15, startY + 6);
-  doc.text(`REGISTRO OFICIAL: ${new Date(check.timestamp).toLocaleString('pt-BR')}`, 15, startY + 10);
+  doc.text(`PRONTIDÃO: ${safeUpper(shiftInfo.label)}`, 15, startY + 10);
+  doc.text(`REALIZADO EM: ${new Date(check.timestamp).toLocaleString('pt-BR')}`, 15, startY + 15);
+  doc.text(`CONFERENTE: ${safeUpper(check.responsibleNames.join(' / '))}`, 15, startY + 20);
+  doc.text(`COMANDANTE DA VTR: ${safeUpper(check.commanderName)}`, 15, startY + 25);
+  doc.text(`STATUS DA VTR: ${safeUpper(check.viaturaStatusAtTime || ViaturaStatus.OPERANDO)}`, 15, startY + 30);
 
-  let currentY = startY + 18;
-
-  // Justificativa do Registro (caso exista)
-  if (check.justification) {
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(200, 0, 0);
-    doc.text("JUSTIFICATIVA DO REGISTRO:", 15, currentY);
-    currentY += 4;
-    doc.setFont('helvetica', 'italic');
-    doc.setTextColor(0, 0, 0);
-    const splitJust = doc.splitTextToSize(check.justification, 180);
-    doc.text(splitJust, 15, currentY);
-    currentY += (splitJust.length * 4) + 2;
-  }
-
-  // Tabela de Itens (Snapshot do momento da conferência)
   const tableData: any[] = [];
-  const itemsToList = check.snapshot || viatura.items;
-  const grouped = itemsToList.reduce((acc, item) => {
+  const grouped = (check.snapshot || viatura.items).reduce((acc, item) => {
     const comp = item.compartment || 'GERAL';
     if (!acc[comp]) acc[comp] = [];
     acc[comp].push(item);
     return acc;
   }, {} as Record<string, any[]>);
 
-  Object.entries(grouped).forEach(([compartment, items]) => {
-    tableData.push([{ content: safeUpper(compartment), colSpan: 4, styles: { fillColor: [240, 240, 240], fontStyle: 'bold', fontSize: 7 } }]);
+  Object.entries(grouped).forEach(([comp, items]) => {
+    tableData.push([{ content: safeUpper(comp), colSpan: 4, styles: { fillColor: [240, 240, 240], fontStyle: 'bold' } }]);
     items.forEach(item => {
       const entry = check.entries.find(e => e.itemId === item.id);
-      tableData.push([
-        item.quantity.toString().padStart(2, '0'),
-        { content: `${item.name}${item.specification ? ' (' + item.specification + ')' : ''}`, styles: { fontSize: 7 } },
-        { content: entry?.status || '-', styles: { halign: 'center', fontSize: 7, fontStyle: 'bold', textColor: entry?.status === 'CN' ? [220, 38, 38] : [0,0,0] } },
-        { content: entry?.observation || '', styles: { fontSize: 6 } }
-      ]);
+      tableData.push([item.quantity.toString().padStart(2, '0'), `${item.name}${item.specification ? ' (' + item.specification + ')' : ''}`, { content: entry?.status || '-', styles: { halign: 'center', fontStyle: 'bold', textColor: entry?.status === 'CN' ? [200, 0, 0] : [0,0,0] } }, entry?.observation || '']);
     });
   });
 
   (doc as any).autoTable({
-    startY: currentY,
+    startY: startY + 35,
     head: [['Qt', 'Material / Equipamento', 'Status', 'Observações']],
     body: tableData,
     theme: 'grid',
-    headStyles: { fillColor: rgb, fontStyle: 'bold', fontSize: 8 },
-    styles: { cellPadding: 0.8 },
-    columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 1: { cellWidth: 90 }, 2: { cellWidth: 15, halign: 'center' }, 3: { cellWidth: 'auto' } },
-    margin: { left: 15, right: 15 }
+    headStyles: { fillColor: rgb },
+    styles: { fontSize: 7, cellPadding: 1.5 },
+    columnStyles: { 0: { cellWidth: 12 }, 1: { cellWidth: 90 }, 2: { cellWidth: 15 }, 3: { cellWidth: 'auto' } }
   });
 
+  const finalY = (doc as any).lastAutoTable.finalY + 10;
+  doc.setFontSize(7);
+  doc.setTextColor(100, 100, 100);
+  doc.text("Legenda: S (Sem Novidade), CN (Com Novidade), NA (Novidade Anterior)", 15, finalY);
+
   addPageNumbers(doc);
-  if (isPreview) window.open(doc.output('bloburl'), '_blank'); else doc.save(`Checklist_${viatura.prefix}.pdf`);
+  if (isPreview) window.open(doc.output('bloburl'), '_blank'); else doc.save(`Conferencia_${viatura.prefix}.pdf`);
 };
 
 /**
- * RELATÓRIO 3: MAPA MENSAL DETALHADO (NOMES 90º)
+ * RELATÓRIO 2: MAPA MENSAL DETALHADO (CONFERÊNCIAS REALIZADAS)
  */
-export const generateVtrDetailedMonthlyPDF = (viatura: Viatura, checks: InventoryCheck[], monthYear: string, isPreview: boolean = false) => {
+export const generateVtrDetailedMonthlyPDF = (viatura: Viatura, checks: InventoryCheck[], monthYear: string, isPreview: boolean = false, allPostos: Posto[] = []) => {
     const JsPDF = getJsPDF();
     const doc = new JsPDF('l', 'mm', 'a4'); 
-    
-    const [year, month] = monthYear.split('-').map(Number);
-    const daysInMonth = new Date(year, month, 0).getDate();
-    
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`MAPA MENSAL DE CONFERÊNCIA DETALHADO: ${viatura.prefix} - ${monthYear}`, 148, 12, { align: "center" });
+    const daysInMonth = getDaysInMonth(monthYear);
+    const posto = allPostos.find(p => p.id === viatura.postoId);
+    const postoInfo = posto ? `${posto.classification || 'Pelotão'} de Bombeiros de ${posto.name}` : '';
 
-    const body: any[] = viatura.items.map(item => {
-        const row: any[] = [safeUpper(item.name)];
-        for (let d = 1; d <= daysInMonth; d++) {
-            const dateStr = `${monthYear}-${d.toString().padStart(2, '0')}`;
-            const check = checks.find(c => c.viaturaId === viatura.id && getShiftReferenceDate(c.timestamp) === dateStr);
-            if (check) {
-                const entry = check.entries.find(e => e.itemId === item.id);
-                row.push(entry?.status || '-');
-            } else {
-                const hStatus = getHistoricalVtrStatus(viatura, dateStr, checks);
-                row.push(hStatus === ViaturaStatus.RESERVA ? 'RES' : hStatus === ViaturaStatus.BAIXADA ? 'BX' : '');
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text(safeUpper(DEFAULT_HEADER.corpoBombeiros), 148, 12, { align: "center" });
+    doc.text(`MAPA MENSAL DE CONFERÊNCIA DETALHADO: ${viatura.prefix} - ${safeUpper(postoInfo)} - ${monthYear}`, 148, 18, { align: "center" });
+
+    const grouped = viatura.items.reduce((acc, item) => {
+        const comp = item.compartment || 'GERAL';
+        if (!acc[comp]) acc[comp] = [];
+        acc[comp].push(item);
+        return acc;
+    }, {} as Record<string, any[]>);
+
+    const body: any[] = [];
+    Object.entries(grouped).forEach(([comp, items]) => {
+        body.push([{ content: safeUpper(comp), colSpan: daysInMonth + 1, styles: { fillColor: [230, 230, 230], fontStyle: 'bold', halign: 'left' } }]);
+        items.forEach(item => {
+            const row: any[] = [safeUpper(item.name)];
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dateStr = `${monthYear}-${d.toString().padStart(2, '0')}`;
+                const check = checks.find(c => c.viaturaId === viatura.id && getShiftReferenceDate(c.timestamp) === dateStr);
+                row.push(check ? (check.entries.find(e => e.itemId === item.id)?.status || '-') : '');
             }
-        }
-        return row;
+            body.push(row);
+        });
     });
 
-    const conferenteRow: any[] = ['CONFERENTE'];
-    for (let d = 1; d <= daysInMonth; d++) conferenteRow.push(''); 
-    body.push(conferenteRow);
-
-    const dayColWidth = 222 / daysInMonth; 
+    body.push([{ content: 'Responsável pela conferência do Dia', styles: { halign: 'left', fontStyle: 'bold', minCellHeight: 40, valign: 'middle' } }, ...Array(daysInMonth).fill('')]);
+    const dayWidth = 222 / daysInMonth; 
 
     (doc as any).autoTable({
-        startY: 20,
-        head: [['Material / Especificação', ...Array.from({ length: daysInMonth }, (_, i) => (i + 1).toString())]],
+        startY: 25,
+        margin: { left: 10, right: 10 },
+        head: [['Material / Especificação', ...Array.from({ length: daysInMonth }, (_, i) => (i + 1).toString().padStart(2, '0'))]],
         body,
         theme: 'grid',
-        styles: { fontSize: 5, cellPadding: 0.5, halign: 'center', valign: 'middle' },
-        headStyles: { fillColor: [51, 65, 85], fontSize: 5 },
-        columnStyles: { 0: { cellWidth: 55, halign: 'left', fontStyle: 'bold' }, ...Object.fromEntries(Array.from({length: daysInMonth}, (_, i) => [i + 1, { cellWidth: dayColWidth }])) },
-        margin: { left: 10, right: 10 },
-        
+        styles: { fontSize: 5, cellPadding: 0.5, halign: 'center', valign: 'middle', overflow: 'linebreak' },
+        headStyles: { fillColor: [180, 0, 0], textColor: 255 }, 
+        columnStyles: { 0: { cellWidth: 55, halign: 'left', fontStyle: 'bold' }, ...Object.fromEntries(Array.from({length: daysInMonth}, (_, i) => [i + 1, { cellWidth: dayWidth }])) },
         didDrawCell: (data: any) => {
-            const isLastRow = data.row.index === body.length - 1;
-            const isDayColumn = data.column.index > 0;
-
-            if (isLastRow && isDayColumn) {
+            if (data.row.index === body.length - 1 && data.column.index > 0) {
                 const day = data.column.index;
                 const dateStr = `${monthYear}-${day.toString().padStart(2, '0')}`;
                 const check = checks.find(c => c.viaturaId === viatura.id && getShiftReferenceDate(c.timestamp) === dateStr);
-                
-                if (check && Array.isArray(check.responsibleNames) && check.responsibleNames.length > 0) {
-                    const name = safeUpper(check.responsibleNames[0]);
-                    if (name) {
-                        doc.saveGraphicsState();
-                        doc.setFontSize(4);
-                        doc.setFont('helvetica', 'bold');
-                        const x = data.cell.x + (data.cell.width / 2) + 1;
-                        const y = data.cell.y + data.cell.height - 2;
-                        doc.text(name, x, y, { angle: 90, align: 'left' });
-                        doc.restoreGraphicsState();
-                    }
+                if (check?.responsibleNames?.[0]) {
+                    doc.saveGraphicsState();
+                    doc.setFontSize(4.5);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setTextColor(60, 60, 60);
+                    const textX = data.cell.x + (data.cell.width / 2) + 1.2;
+                    const textY = data.cell.y + data.cell.height - 1.5; 
+                    doc.text(safeUpper(check.responsibleNames[0]), textX, textY, { angle: 90 });
+                    doc.restoreGraphicsState();
                 }
             }
         },
         didParseCell: (data: any) => {
             if (data.row.index === body.length - 1) {
-                data.cell.styles.minCellHeight = 28; 
-                if (data.column.index > 0) data.cell.styles.valign = 'bottom';
+                data.cell.styles.minCellHeight = 40;
+                data.cell.styles.valign = 'bottom';
             }
         }
     });
@@ -246,100 +193,204 @@ export const generateVtrDetailedMonthlyPDF = (viatura: Viatura, checks: Inventor
 };
 
 /**
- * RELATÓRIO DE EFICIÊNCIA OPERACIONAL
- * Corrigido: Vinculação fiel do posto para evitar unidades trocadas.
+ * RELATÓRIO 3: FORMULÁRIO PARA CONFERÊNCIA MANUAL DIÁRIA
  */
-export const generateEfficiencyReportPDF = (checks: InventoryCheck[], viaturas: Viatura[], monthYear: string, isPreview: boolean = false, allPostos: Posto[] = []) => {
+export const generateManualDailyPDF = (viatura: Viatura, postos: Posto[]) => {
   const JsPDF = getJsPDF();
-  const doc = new JsPDF('p', 'mm', 'a4');
-  
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(34, 197, 94);
-  doc.text(`EFICIÊNCIA OPERACIONAL POR UNIDADE - ${monthYear}`, 105, 15, { align: "center" });
-  
-  const data = viaturas.map(v => {
-    const vChecks = checks.filter(c => c.viaturaId === v.id && getShiftReferenceDate(c.timestamp).startsWith(monthYear));
-    const uniqueDays = new Set(vChecks.map(c => getShiftReferenceDate(c.timestamp))).size;
-    
-    const posto = allPostos.find(p => p.id === v.postoId);
-    const unitLabel = posto ? safeUpper(posto.name) : 'S/ VINCULAÇÃO';
+  const doc = new JsPDF();
+  const title = `FORMULÁRIO DE CONFERÊNCIA MANUAL: ${viatura.prefix}`;
 
-    return [
-      v.prefix, 
-      unitLabel, 
-      `${uniqueDays} dias`, 
-      `${((uniqueDays / 30) * 100).toFixed(1)}%`
-    ];
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.text(safeUpper(DEFAULT_HEADER.corpoBombeiros), 105, 15, { align: "center" });
+  doc.setFontSize(10);
+  doc.text(safeUpper(title), 105, 22, { align: "center" });
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`DATA: ____/____/2026   PRONTIDÃO: ( ) VERDE  ( ) AMARELA  ( ) AZUL`, 15, 30);
+  doc.text(`COMANDANTE DA VTR: ________________________________________________`, 15, 35);
+  doc.text(`CONFERENTE: ________________________________________________________`, 15, 40);
+
+  const tableData: any[] = [];
+  const grouped = viatura.items.reduce((acc, item) => {
+    const comp = item.compartment || 'GERAL';
+    if (!acc[comp]) acc[comp] = [];
+    acc[comp].push(item);
+    return acc;
+  }, {} as Record<string, any[]>);
+
+  Object.entries(grouped).forEach(([comp, items]) => {
+    tableData.push([{ content: safeUpper(comp), colSpan: 4, styles: { fillColor: [240, 240, 240], fontStyle: 'bold' } }]);
+    items.forEach(item => {
+      tableData.push([
+        item.quantity.toString().padStart(2, '0'),
+        `${item.name}${item.specification ? ' (' + item.specification + ')' : ''}`,
+        '[   ]',
+        '____________________'
+      ]);
+    });
   });
-  
-  (doc as any).autoTable({ 
-    startY: 25, 
-    head: [['Viatura', 'Unidade / Posto', 'Dias Conferidos', 'Eficiência']], 
-    body: data,
+
+  (doc as any).autoTable({
+    startY: 45,
+    head: [['Qt', 'Material / Equipamento', 'S/CN', 'Observações']],
+    body: tableData,
     theme: 'grid',
-    headStyles: { fillColor: [34, 197, 94] },
-    styles: { fontSize: 8 }
+    headStyles: { fillColor: [180, 0, 0] },
+    styles: { fontSize: 7, cellPadding: 2 },
+    columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 90 }, 2: { cellWidth: 15 }, 3: { cellWidth: 'auto' } }
   });
-  
+
   addPageNumbers(doc);
-  if (isPreview) window.open(doc.output('bloburl'), '_blank'); else doc.save(`Eficiencia_${monthYear}.pdf`);
+  window.open(doc.output('bloburl'), '_blank');
 };
 
 /**
- * DEMAIS RELATÓRIOS (Numeração de páginas aplicada)
+ * RELATÓRIO 4: FORMULÁRIO PARA CONFERÊNCIA MANUAL MENSAL
  */
-export const generateNewsReportPDF = (checks: InventoryCheck[], viaturas: Viatura[], monthYear: string, isPreview: boolean = false) => {
+export const generateManualMonthlyPDF = (viatura: Viatura, monthYear: string, postos: Posto[]) => {
   const JsPDF = getJsPDF();
-  const doc = new JsPDF();
-  doc.setFontSize(14);
+  const doc = new JsPDF('l', 'mm', 'a4');
+  const daysInMonth = getDaysInMonth(monthYear);
+  
+  doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.text(`RESUMO DE NOVIDADES - ${monthYear}`, 105, 15, { align: "center" });
-  const data = checks.filter(c => getShiftReferenceDate(c.timestamp).startsWith(monthYear)).flatMap(c => {
-    const vtr = viaturas.find(v => v.id === c.viaturaId);
-    return c.entries.filter(e => e.status === 'CN').map(e => [
-      formatDateShort(getShiftReferenceDate(c.timestamp)),
-      vtr?.prefix || '?',
-      e.observation || 'S/ detalhes'
-    ]);
+  doc.text(safeUpper(DEFAULT_HEADER.corpoBombeiros), 148, 12, { align: "center" });
+  doc.text(`MAPA MENSAL DE CONFERÊNCIA (MANUAL): ${viatura.prefix} - ${monthYear}`, 148, 18, { align: "center" });
+
+  const grouped = viatura.items.reduce((acc, item) => {
+      const comp = item.compartment || 'GERAL';
+      if (!acc[comp]) acc[comp] = [];
+      acc[comp].push(item);
+      return acc;
+  }, {} as Record<string, any[]>);
+
+  const body: any[] = [];
+  Object.entries(grouped).forEach(([comp, items]) => {
+      body.push([{ content: safeUpper(comp), colSpan: daysInMonth + 1, styles: { fillColor: [230, 230, 230], fontStyle: 'bold', halign: 'left' } }]);
+      items.forEach(item => {
+          body.push([safeUpper(item.name), ...Array(daysInMonth).fill('')]);
+      });
   });
-  (doc as any).autoTable({ startY: 25, head: [['Data', 'Vtr', 'Novidade']], body: data });
-  addPageNumbers(doc);
-  if (isPreview) window.open(doc.output('bloburl'), '_blank'); else doc.save(`Novidades.pdf`);
-};
 
-export const generateSummaryPDF = (checks: InventoryCheck[], viaturas: Viatura[], isPreview: boolean = false) => {
-  const JsPDF = getJsPDF();
-  const doc = new JsPDF('l'); 
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
-  doc.text("HISTÓRICO GERAL DE CONFERÊNCIAS", 148, 15, { align: "center" });
-  const data = checks.map(c => [formatDateShort(getShiftReferenceDate(c.timestamp)), viaturas.find(v => v.id === c.viaturaId)?.prefix || '?', c.commanderName]);
-  (doc as any).autoTable({ startY: 25, head: [['Data', 'Vtr', 'Comandante']], body: data });
-  addPageNumbers(doc);
-  if (isPreview) window.open(doc.output('bloburl'), '_blank'); else doc.save(`Resumo_Geral.pdf`);
-};
+  body.push([{ content: 'Responsável (Rubrica)', styles: { halign: 'left', fontStyle: 'bold', minCellHeight: 30, valign: 'middle' } }, ...Array(daysInMonth).fill('')]);
 
-export const generateMaterialAuditPDF = (results: any[], searchTerm: string, isPreview: boolean = false) => {
-  const JsPDF = getJsPDF();
-  const doc = new JsPDF('l'); 
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
-  doc.text(`AUDITORIA: ${safeUpper(searchTerm)}`, 148, 15, { align: "center" });
-  const data = results.map(r => [r.name, r.qty, r.vtrPrefix, r.posto]);
-  (doc as any).autoTable({ startY: 25, head: [['Material', 'Qtd', 'Vtr', 'Posto']], body: data });
+  const dayWidth = 222 / daysInMonth; 
+
+  (doc as any).autoTable({
+      startY: 25,
+      margin: { left: 10, right: 10 },
+      head: [['Material / Especificação', ...Array.from({ length: daysInMonth }, (_, i) => (i + 1).toString().padStart(2, '0'))]],
+      body,
+      theme: 'grid',
+      styles: { fontSize: 5, cellPadding: 0.5, halign: 'center', valign: 'middle' },
+      headStyles: { fillColor: [180, 0, 0], textColor: 255 },
+      columnStyles: { 0: { cellWidth: 55, halign: 'left', fontStyle: 'bold' }, ...Object.fromEntries(Array.from({length: daysInMonth}, (_, i) => [i + 1, { cellWidth: dayWidth }])) }
+  });
+
   addPageNumbers(doc);
-  if (isPreview) window.open(doc.output('bloburl'), '_blank'); else doc.save(`Auditoria.pdf`);
+  window.open(doc.output('bloburl'), '_blank');
 };
 
 export const generateAuditLogPDF = (logs: LogEntry[]) => {
   const JsPDF = getJsPDF();
   const doc = new JsPDF('l');
-  doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text("LOGS DO SISTEMA", 10, 15);
+  doc.text("LOGS DE AUDITORIA DO SISTEMA", 10, 20);
   const data = logs.map(l => [new Date(l.timestamp).toLocaleString('pt-BR'), l.userName, l.action, l.details]);
-  (doc as any).autoTable({ startY: 25, head: [['Data', 'Usuário', 'Ação', 'Detalhes']], body: data });
+  (doc as any).autoTable({ startY: 30, head: [['Data / Hora', 'Usuário', 'Ação', 'Detalhes']], body: data, headStyles: { fillColor: [50, 50, 50] } });
   addPageNumbers(doc);
-  doc.save(`Logs.pdf`);
+  doc.save(`Auditoria.pdf`);
+};
+
+export const generateSummaryPDF = (checks: InventoryCheck[], viaturas: Viatura[], isPreview: boolean = false) => {
+  const JsPDF = getJsPDF();
+  const doc = new JsPDF('l'); 
+  doc.setFont('helvetica', 'bold');
+  doc.text("HISTÓRICO GERAL DE CONFERÊNCIAS", 148, 20, { align: "center" });
+  const data = checks.map(c => [formatDateShort(getShiftReferenceDate(c.timestamp)), viaturas.find(v => v.id === c.viaturaId)?.prefix || '?', c.commanderName]);
+  (doc as any).autoTable({ startY: 30, head: [['Data', 'Vtr', 'Comandante']], body: data, headStyles: { fillColor: [180, 0, 0] } });
+  addPageNumbers(doc);
+  if (isPreview) window.open(doc.output('bloburl'), '_blank'); else doc.save(`Resumo_Geral.pdf`);
+};
+
+/**
+ * RELATÓRIO 5: RESUMO DE NOVIDADES (CN)
+ */
+export const generateNewsReportPDF = (checks: InventoryCheck[], viaturas: Viatura[], monthYear: string, isPreview: boolean = false, filterVtrId?: string) => {
+  const JsPDF = getJsPDF();
+  const doc = new JsPDF();
+  
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text(safeUpper(DEFAULT_HEADER.corpoBombeiros), 105, 15, { align: "center" });
+  doc.text(`RELATÓRIO DE NOVIDADES (CN): ${monthYear}`, 105, 22, { align: "center" });
+
+  const novelties: any[] = [];
+  
+  const filteredChecks = filterVtrId 
+    ? checks.filter(c => c.viaturaId === filterVtrId && getShiftReferenceDate(c.timestamp).startsWith(monthYear))
+    : checks.filter(c => getShiftReferenceDate(c.timestamp).startsWith(monthYear));
+
+  filteredChecks.forEach(check => {
+    const vtr = viaturas.find(v => v.id === check.viaturaId);
+    check.entries.forEach(entry => {
+      if (entry.status === 'CN') {
+        const item = check.snapshot?.find(i => i.id === entry.itemId) || vtr?.items.find(i => i.id === entry.itemId);
+        novelties.push([
+          formatDateShort(getShiftReferenceDate(check.timestamp)),
+          vtr?.prefix || '?',
+          item?.name || 'Item Desconhecido',
+          entry.observation || 'Sem descrição'
+        ]);
+      }
+    });
+  });
+
+  (doc as any).autoTable({
+    startY: 30,
+    head: [['Data', 'Vtr', 'Material', 'Observação']],
+    body: novelties,
+    theme: 'grid',
+    headStyles: { fillColor: [180, 0, 0] },
+    styles: { fontSize: 7 }
+  });
+
+  addPageNumbers(doc);
+  if (isPreview) window.open(doc.output('bloburl'), '_blank'); else doc.save(`Novidades_${monthYear}.pdf`);
+};
+
+/**
+ * RELATÓRIO 6: AUDITORIA GLOBAL DE MATERIAL
+ */
+export const generateMaterialAuditPDF = (results: any[], searchTerm: string, isPreview: boolean = false) => {
+  const JsPDF = getJsPDF();
+  const doc = new JsPDF('l'); 
+  
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`AUDITORIA DE MATERIAL: ${safeUpper(searchTerm)}`, 148, 15, { align: "center" });
+  
+  const body = results.map(r => [
+    r.name,
+    r.spec,
+    r.qty,
+    r.vtrPrefix,
+    r.compartment,
+    r.posto,
+    r.sgb
+  ]);
+
+  (doc as any).autoTable({
+    startY: 25,
+    head: [['Material', 'Especificação', 'Qtd', 'Viatura', 'Compartimento', 'Unidade', 'SGB']],
+    body: body,
+    theme: 'grid',
+    headStyles: { fillColor: [50, 50, 50] },
+    styles: { fontSize: 7 }
+  });
+
+  addPageNumbers(doc);
+  if (isPreview) window.open(doc.output('bloburl'), '_blank'); else doc.save(`Auditoria_Material_${searchTerm}.pdf`);
 };

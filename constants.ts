@@ -2,14 +2,17 @@
 import { Viatura, ProntidaoColor, GB, Subgrupamento, Posto, ViaturaStatus, RolePermissions, UserRole, Theme, HeaderConfig } from './types';
 
 export const PRONTIDAO_CYCLE = [
-  { color: ProntidaoColor.VERDE, label: 'Verde', hex: '#22c55e' },
-  { color: ProntidaoColor.AMARELA, label: 'Amarela', hex: '#eab308' },
-  { color: ProntidaoColor.AZUL, label: 'Azul', hex: '#3b82f6' }
+  { color: ProntidaoColor.VERDE, label: 'Verde', hex: '#10b981' }, // Esmeralda Vibrante
+  { color: ProntidaoColor.AMARELA, label: 'Amarela', hex: '#f59e0b' }, // Âmbar Vibrante
+  { color: ProntidaoColor.AZUL, label: 'Azul', hex: '#2563eb' } // Safira Vibrante
 ];
 
 export const INITIAL_GBS: GB[] = [{ id: 'gb1', name: '20º Grupamento de Bombeiros' }];
 export const INITIAL_SUBS: Subgrupamento[] = [{ id: 'sub1', gbId: 'gb1', name: '1º Subgrupamento de Bombeiros' }];
-export const INITIAL_POSTOS: Posto[] = [{ id: 'posto1', subId: 'sub1', name: 'Pelotão de Bombeiros de Birigui', municipio: 'Birigui', classification: 'Pelotão' }];
+export const INITIAL_POSTOS: Posto[] = [{ id: 'posto1', subId: 'sub1', name: 'Birigui', municipio: 'Birigui', classification: 'Pelotão de Bombeiros' }];
+
+// Fix: Definindo INITIAL_VIATURAS que estava faltando mas sendo importado no DataService
+export const INITIAL_VIATURAS: Viatura[] = [];
 
 export const RESET_MASTER_TOKEN = "20GB-BOMBEIROS-RESET";
 
@@ -43,76 +46,50 @@ export const PERMISSION_LABELS: Record<string, string> = {
 
 export const THEME_PRESETS: Theme[] = [
   {
-    id: 'modern',
-    name: 'Moderno (Padrão)',
+    id: 'modern_red',
+    name: 'Modelo 1: Empresarial Red (Padrão)',
     colors: {
-      primary: '#dc2626',
-      secondary: '#0f172a',
+      primary: '#e11d48', // Rose Vibrante
+      secondary: '#0f172a', // Slate Escuro
       background: '#f8fafc',
       surface: '#ffffff',
-      textMain: '#0f172a',
-      readinessVerde: '#22c55e',
-      readinessAmarela: '#eab308',
-      readinessAzul: '#3b82f6'
+      textMain: '#1e293b',
+      readinessVerde: '#10b981',
+      readinessAmarela: '#f59e0b',
+      readinessAzul: '#2563eb'
     }
   },
   {
-    id: 'professional',
-    name: 'Profissional',
+    id: 'sapphire_blue',
+    name: 'Modelo 2: Sapphire Blue (Corporativo)',
     colors: {
       primary: '#2563eb',
       secondary: '#1e293b',
       background: '#f1f5f9',
       surface: '#ffffff',
-      textMain: '#1e293b',
-      readinessVerde: '#15803d',
+      textMain: '#0f172a',
+      readinessVerde: '#059669',
       readinessAmarela: '#ca8a04',
       readinessAzul: '#1d4ed8'
     }
   },
   {
-    id: 'corporate',
-    name: 'Corporativo',
+    id: 'steel_emerald',
+    name: 'Modelo 3: Steel Emerald (Futurista)',
     colors: {
       primary: '#059669',
-      secondary: '#171717',
-      background: '#fafafa',
+      secondary: '#111827',
+      background: '#f9fafb',
       surface: '#ffffff',
-      textMain: '#171717',
-      readinessVerde: '#059669',
-      readinessAmarela: '#d97706',
-      readinessAzul: '#2563eb'
+      textMain: '#111827',
+      readinessVerde: '#10b981',
+      readinessAmarela: '#f59e0b',
+      readinessAzul: '#3b82f6'
     }
   }
 ];
 
 export const DEFAULT_THEME = THEME_PRESETS[0];
-
-export const INITIAL_VIATURAS: Viatura[] = [
-  {
-    id: 'abs20103',
-    name: 'Auto Bomba Salvamento',
-    prefix: 'ABS-20103',
-    status: ViaturaStatus.OPERANDO,
-    postoId: 'posto1',
-    items: [
-      { id: 'abs_1', name: 'Caixa de Calços', specification: '', quantity: 1, compartment: 'GAVETÃO ATRÁS DA CABINE 01' },
-      { id: 'abs_2', name: 'EPR Completos', specification: 'Drager', quantity: 2, compartment: 'GAVETÃO ATRÁS DA CABINE 01' },
-      { id: 'abs_3', name: 'Serra Sabre', specification: 'Com duas Baterias', quantity: 1, compartment: 'GAVETÃO ATRÁS DA CABINE 01' },
-      { id: 'abs_4', name: 'Alavanca Halligan', specification: '', quantity: 1, compartment: 'GAVETÃO ATRÁS DA CABINE 01' },
-      { id: 'abs_5', name: 'Cilindros Reserva EPR', specification: 'Drager', quantity: 4, compartment: 'GAVETA 02' },
-      { id: 'abs_6', name: 'Desencarcerador', specification: 'Holmatro', quantity: 1, compartment: 'GAVETA 03' },
-      { id: 'abs_7', name: 'Mangueiras Resgate', specification: '', quantity: 1, compartment: 'GAVETA 03' },
-      { id: 'abs_8', name: 'Escada Prolongável', specification: 'Fibra', quantity: 1, compartment: 'LATERAL' },
-      { id: 'abs_9', name: 'Cones', specification: '', quantity: 6, compartment: 'TRASEIRA' },
-      { id: 'abs_10', name: 'Mangueira 63mm', specification: '', quantity: 2, compartment: 'GAVETA 04' },
-      { id: 'abs_11', name: 'Mangueira 38mm', specification: '', quantity: 3, compartment: 'GAVETA 04' },
-      { id: 'abs_12', name: 'Derivante 63mm', specification: '', quantity: 1, compartment: 'GAVETA 05' },
-      { id: 'abs_13', name: 'Esguicho Tipo Pistola', specification: '38mm', quantity: 1, compartment: 'GAVETA 05' }
-    ]
-  }
-];
-
 export const APP_NAME = "Conferência de Materiais";
 
 export const DEFAULT_HEADER = {

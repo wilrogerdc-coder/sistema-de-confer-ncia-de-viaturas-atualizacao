@@ -1,10 +1,22 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Viatura, InventoryCheck, CheckStatus, CheckEntry, ProntidaoColor, MaterialItem, ViaturaStatus, Posto, Subgrupamento, GB, SystemSettings } from '../types';
-import { getProntidaoInfo, safeDateIso } from '../utils/calendarUtils';
-import { DEFAULT_HEADER, DEFAULT_HEADER_CONFIG } from '../constants';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Viatura, InventoryCheck, CheckStatus, CheckEntry, MaterialItem, ViaturaStatus, Posto, Subgrupamento, GB, SystemSettings } from '../types';
+import { getProntidaoInfo, getShiftReferenceDate } from '../utils/calendarUtils';
+import { DEFAULT_HEADER_CONFIG } from '../constants';
 import { generateInventoryPDF } from '../utils/pdfGenerator';
 import { DataService } from '../services/dataService';
+
+/**
+ * Utilitário para obter a data local no formato YYYY-MM-DD
+ * Evita problemas de fuso horário que o toISOString causa ao final do dia.
+ */
+const getTodayLocal = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 interface ChecklistProps {
   viaturas: Viatura[];
@@ -21,133 +33,127 @@ const Checklist: React.FC<ChecklistProps> = ({ viaturas, checks, onComplete, onF
   const [selectedVtrId, setSelectedVtrId] = useState<string>('');
   const [lastCheck, setLastCheck] = useState<InventoryCheck | null>(null);
   const [settings, setSettings] = useState<SystemSettings | null>(null);
-  
-  const todayStr = new Date().toISOString().split('T')[0];
-  const [date, setDate] = useState<string>(todayStr);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [date, setDate] = useState<string>(getTodayLocal());
   const [justification, setJustification] = useState('');
   const [responsibleList, setResponsibleList] = useState<string[]>(['']);
   const [commander, setCommander] = useState('');
   const [entries, setEntries] = useState<Record<string, CheckEntry>>({});
   const [openCompartments, setOpenCompartments] = useState<Record<string, boolean>>({});
-  const listTopRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    DataService.getSettings().then(setSettings);
-  }, []);
+  useEffect(() => { DataService.getSettings().then(setSettings); }, []);
 
   const selectedVtr = viaturas.find(v => v.id === selectedVtrId);
-  const prontidao = getProntidaoInfo(new Date(date + 'T12:00:00'));
+  const prontidao = getProntidaoInfo(date); 
   
-  const totalItems = selectedVtr?.items.length || 0;
-  const answeredItems = Object.keys(entries).length;
-  const progressPercent = totalItems > 0 ? Math.round((answeredItems / totalItems) * 100) : 0;
+  const groupedItems = useMemo(() => {
+    if (!selectedVtr) return {} as Record<string, MaterialItem[]>;
+    return selectedVtr.items.reduce((acc, item) => {
+      const comp = item.compartment || 'GERAL';
+      if (!acc[comp]) acc[comp] = [];
+      acc[comp].push(item);
+      return acc;
+    }, {} as Record<string, MaterialItem[]>);
+  }, [selectedVtr]);
 
-  const isJustificationRequired = date !== todayStr || checks.some(c => c.viaturaId === selectedVtrId && safeDateIso(c.date) === date);
-
-  const groupedItems: Record<string, MaterialItem[]> = selectedVtr?.items.reduce((acc, item) => {
-    const comp = item.compartment || 'GERAL';
-    if (!acc[comp]) acc[comp] = [];
-    acc[comp].push(item);
-    return acc;
-  }, {} as Record<string, MaterialItem[]>) || {};
+  const progressPercent = selectedVtr?.items.length ? Math.round((Object.keys(entries).length / selectedVtr.items.length) * 100) : 0;
+  
+  const isJustificationRequired = date !== getTodayLocal() || checks.some(c => c.viaturaId === selectedVtrId && getShiftReferenceDate(c.timestamp) === date);
 
   useEffect(() => {
     if (selectedVtrId && step !== 'finished') {
       setStep('form');
       setEntries({});
       setJustification('');
-      const comps = Object.keys(groupedItems);
-      if (comps.length > 0) setOpenCompartments({ [comps[0]]: true });
-      if (listTopRef.current) listTopRef.current.scrollIntoView({ behavior: 'smooth' });
+      // Ordem direta: Garante data atual local ao iniciar a conferência de qualquer viatura
+      setDate(getTodayLocal()); 
       onFullScreenChange?.(true);
     }
   }, [selectedVtrId]);
 
-  /**
-   * RESOLUÇÃO DE CABEÇALHO DINÂMICO (CORRIGIDO V2)
-   * Garante que a viatura (Ex: ABS-2010) seja vinculada ao seu posto real (Ex: Estação Jussara)
-   * e não a unidades genéricas ou fixas.
-   */
-  const resolveHeaderSnapshot = () => {
-    const globalStrings = settings?.headerConfig || DEFAULT_HEADER_CONFIG;
-    
-    // Fallback de segurança caso a viatura não tenha posto vinculado
-    if (!selectedVtr || !selectedVtr.postoId) {
-        return { 
-            ...globalStrings, 
-            unidade: "20º GRUPAMENTO DE BOMBEIROS",
-            subgrupamento: "1º SUBGRUPAMENTO DE BOMBEIROS",
-            pelotao: "POSTO NÃO VINCULADO",
-            cidade: "SÃO PAULO"
-        };
-    }
-    
-    // Busca na hierarquia cadastrada para obter o nome oficial
-    const posto = postos.find(p => p.id === selectedVtr.postoId);
-    const sub = subs.find(s => s.id === posto?.subId);
-    const gb = gbs.find(g => g.id === sub?.gbId);
+  const saveCheckInternal = async (isQuickStatus: boolean = false) => {
+    if (!isQuickStatus && progressPercent < 100) return alert("Conclua todos os itens antes de salvar.");
+    if (isJustificationRequired && !justification.trim()) return alert("Justificativa é obrigatória.");
+    if (!commander.trim() || responsibleList.every(r => !r.trim())) return alert("Comandante e ao menos um conferente são obrigatórios.");
 
-    return {
-        secretaria: globalStrings.secretaria,
-        policiaMilitar: globalStrings.policiaMilitar,
-        corpoBombeiros: globalStrings.corpoBombeiros,
-        unidade: (gb?.name || "20º GRUPAMENTO DE BOMBEIROS").toUpperCase(),
-        subgrupamento: (sub?.name || "1º SUBGRUPAMENTO DE BOMBEIROS").toUpperCase(),
-        // Linha 6: Unidade Operacional Oficial
-        pelotao: `${posto?.classification || 'POSTO'} DE BOMBEIROS ${posto?.name || ''}`.trim().toUpperCase(),
-        // Linha 7 (Município): Usado dinamicamente no gerador de PDF
-        cidade: (posto?.municipio || "MUNICÍPIO NÃO DEFINIDO").toUpperCase()
-    };
+    setIsSubmitting(true);
+    try {
+      const finalEntries: CheckEntry[] = isQuickStatus 
+        ? (selectedVtr?.items?.map(item => ({ 
+            itemId: item.id, 
+            status: 'NA' as CheckStatus,
+            observation: selectedVtr?.status
+          })) || [])
+        : Object.values(entries);
+
+      const check: InventoryCheck = {
+        id: Math.random().toString(36).substr(2, 9),
+        viaturaId: selectedVtrId,
+        date,
+        shiftColor: prontidao.label,
+        responsibleNames: responsibleList.filter(n => n.trim() !== ''),
+        commanderName: commander,
+        entries: finalEntries,
+        timestamp: new Date().toISOString(),
+        justification: isJustificationRequired ? justification : undefined,
+        headerDetails: {
+            ... (settings?.headerConfig || DEFAULT_HEADER_CONFIG),
+            unidade: (gbs.find(g => g.id === subs.find(s => s.id === postos.find(p => p.id === selectedVtr?.postoId)?.subId)?.gbId)?.name || "20º GB").toUpperCase(),
+            subgrupamento: (subs.find(s => s.id === postos.find(p => p.id === selectedVtr?.postoId)?.subId)?.name || "1º SGB").toUpperCase(),
+            pelotao: `${postos.find(p => p.id === selectedVtr?.postoId)?.classification || 'PELOTÃO'} DE BOMBEIROS DE ${postos.find(p => p.id === selectedVtr?.postoId)?.name || ''}`.toUpperCase(),
+            cidade: (postos.find(p => p.id === selectedVtr?.postoId)?.municipio || "SÃO PAULO").toUpperCase()
+        },
+        snapshot: selectedVtr?.items || [],
+        viaturaStatusAtTime: selectedVtr?.status || ViaturaStatus.OPERANDO 
+      };
+      await onComplete(check);
+      setLastCheck(check);
+      setStep('finished');
+    } catch (e) { alert("Erro ao salvar."); } finally { setIsSubmitting(false); }
   };
-
-  const constructCheck = (): InventoryCheck => ({
-    id: Math.random().toString(36).substr(2, 9),
-    viaturaId: selectedVtrId,
-    date,
-    shiftColor: prontidao.label,
-    responsibleNames: responsibleList.filter(n => n.trim() !== ''),
-    commanderName: commander,
-    entries: Object.values(entries),
-    timestamp: new Date().toISOString(),
-    justification: isJustificationRequired ? justification : undefined,
-    headerDetails: resolveHeaderSnapshot(),
-    snapshot: selectedVtr?.items || [],
-    viaturaStatusAtTime: selectedVtr?.status || ViaturaStatus.OPERANDO 
-  });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (answeredItems < totalItems) return alert(`Faltam ${totalItems - answeredItems} itens.`);
-    if (isJustificationRequired && !justification.trim()) return alert("Justificativa obrigatória.");
-    if (!window.confirm("Salvar conferência oficial?")) return;
-
-    const check = constructCheck();
-    setLastCheck(check);
-    onComplete(check);
-    setStep('finished');
+    saveCheckInternal(false);
   };
 
   if (step === 'selection') {
     return (
-      <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 px-2">
-        <div className="text-center py-4">
-          <h2 className="text-3xl font-black text-slate-800 tracking-tighter">Nova Conferência</h2>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Selecione o veículo abaixo</p>
+      <div className="space-y-10 animate-in fade-in duration-500 pb-12">
+        <div className="text-center py-10">
+          <h2 className="text-4xl font-black text-slate-800 tracking-tighter uppercase">FROTA OPERACIONAL</h2>
+          <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.4em] mt-3">Selecione uma viatura para iniciar o checklist</p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
           {viaturas.map(v => {
-            const isCheckedToday = checks.some(c => c.viaturaId === v.id && safeDateIso(c.date) === todayStr);
+            const checkedToday = checks.some(c => c.viaturaId === v.id && getShiftReferenceDate(c.timestamp) === getTodayLocal());
+            const isOP = v.status === ViaturaStatus.OPERANDO;
             return (
-              <button key={v.id} onClick={() => setSelectedVtrId(v.id)} className={`bg-white p-6 rounded-[2.5rem] border-2 transition-all text-left shadow-lg active:scale-[0.98] group relative overflow-hidden ${isCheckedToday ? 'border-green-400 ring-4 ring-green-50' : 'border-slate-100 hover:border-red-500'}`}>
-                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity"><span className="text-5xl">🚒</span></div>
-                <div className="flex justify-between items-start mb-4 relative z-10">
-                  <div className="flex flex-col gap-2">
-                    <span className={`w-fit text-[8px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest border ${String(v.status) === ViaturaStatus.OPERANDO ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'}`}>{v.status}</span>
-                    <h3 className={`text-3xl font-black tracking-tighter ${isCheckedToday ? 'text-green-800' : 'text-slate-900'}`}>{v.prefix}</h3>
+              <button 
+                key={v.id} 
+                onClick={() => setSelectedVtrId(v.id)} 
+                className={`bg-white p-8 rounded-[3rem] border-2 transition-all text-left shadow-xl active:scale-95 group relative overflow-hidden flex flex-col justify-between h-72 ${
+                  checkedToday 
+                  ? 'border-emerald-500 bg-emerald-50/20' 
+                  : isOP ? 'border-slate-100 hover:border-blue-500' : v.status === ViaturaStatus.RESERVA ? 'border-amber-100 hover:border-amber-500' : 'border-red-100 hover:border-red-500'
+                }`}
+              >
+                <div>
+                  <div className="flex justify-between items-start mb-6">
+                    <span className={`w-fit text-[10px] font-black px-4 py-2 rounded-2xl uppercase tracking-widest shadow-md ${
+                      isOP ? 'bg-emerald-500 text-white shadow-emerald-200' : v.status === ViaturaStatus.RESERVA ? 'bg-amber-500 text-white shadow-amber-200' : 'bg-red-950 text-white shadow-red-200'
+                    }`}>
+                      {v.status}
+                    </span>
+                    {checkedToday && <div className="bg-emerald-500 text-white p-2 rounded-full shadow-lg animate-in zoom-in">✓</div>}
                   </div>
+                  <h3 className={`text-5xl font-black tracking-tighter leading-none ${checkedToday ? 'text-emerald-800' : 'text-slate-900'}`}>{v.prefix}</h3>
+                  <p className="text-slate-500 font-bold uppercase text-xs tracking-widest mt-3">{v.name}</p>
                 </div>
-                <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mb-4">{v.name}</p>
-                <div className="bg-red-50 text-red-600 px-4 py-2 rounded-2xl font-black text-[11px] uppercase w-fit">Iniciar Checklist →</div>
+                <div className="flex items-center justify-between mt-auto">
+                    <span className="text-[11px] font-black uppercase tracking-widest text-slate-400 group-hover:text-blue-600 transition-colors">Iniciar Checklist →</span>
+                </div>
+                <div className={`absolute bottom-0 right-0 w-40 h-40 opacity-5 pointer-events-none -mr-12 -mb-12 text-[12rem] ${checkedToday ? 'text-emerald-900' : 'text-slate-900'}`}>🚒</div>
               </button>
             );
           })}
@@ -158,61 +164,71 @@ const Checklist: React.FC<ChecklistProps> = ({ viaturas, checks, onComplete, onF
 
   if (step === 'finished') {
     return (
-      <div className="max-w-md mx-auto py-12 text-center space-y-8 animate-in zoom-in px-4">
-        <div className="w-24 h-24 bg-green-500 text-white rounded-full flex items-center justify-center text-4xl mx-auto shadow-2xl">✓</div>
-        <h2 className="text-4xl font-black text-slate-800 tracking-tighter">Registro Salvo!</h2>
-        <div className="space-y-3">
-          <button onClick={() => generateInventoryPDF(lastCheck!, selectedVtr!, true)} className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black uppercase text-xs">VER PDF</button>
-          <button onClick={() => { setSelectedVtrId(''); setStep('selection'); onFullScreenChange?.(false); }} className="w-full py-5 bg-slate-100 text-slate-600 rounded-3xl font-black uppercase text-xs">Voltar ao Início</button>
+      <div className="max-w-md mx-auto py-32 text-center space-y-10 px-6 animate-in zoom-in-95">
+        <div className="w-28 h-28 bg-emerald-500 text-white rounded-[2rem] flex items-center justify-center text-6xl mx-auto shadow-2xl border-8 border-emerald-50">✓</div>
+        <h2 className="text-5xl font-black text-slate-800 tracking-tighter uppercase leading-none">Gravado com Sucesso!</h2>
+        <p className="text-slate-500 font-medium">Os dados foram sincronizados e o histórico oficial foi atualizado.</p>
+        <div className="space-y-4 pt-8">
+          <button onClick={() => generateInventoryPDF(lastCheck!, selectedVtr!, true)} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black uppercase text-sm shadow-2xl active:scale-95 transition-all">Abrir PDF Oficial</button>
+          <button onClick={() => { setSelectedVtrId(''); setStep('selection'); onFullScreenChange?.(false); }} className="w-full py-6 bg-slate-100 text-slate-600 rounded-3xl font-black uppercase text-sm active:scale-95 transition-all">Voltar ao Pátio</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 pb-40" ref={listTopRef}>
-        <div className="bg-white/95 backdrop-blur-md p-3 rounded-b-[2rem] sticky top-0 z-50 shadow-2xl border-b border-slate-100 flex flex-col gap-2">
+    <div className="space-y-6 pb-60">
+        <div className="bg-white/95 backdrop-blur-xl p-6 rounded-b-[3rem] sticky top-0 z-50 shadow-2xl flex flex-col gap-5 border-b border-slate-100">
             <div className="flex items-center justify-between">
-                <button onClick={() => onFullScreenChange?.(false)} className="w-10 h-10 flex items-center justify-center bg-slate-100 rounded-2xl text-slate-500 font-bold">✕</button>
+                <button type="button" onClick={() => onFullScreenChange?.(false)} className="w-12 h-12 flex items-center justify-center bg-slate-100 rounded-2xl text-slate-500 font-bold active:scale-90">✕</button>
                 <div className="text-center">
-                    <h3 className="font-black text-base tracking-tighter leading-none">{selectedVtr?.prefix}</h3>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{selectedVtr?.name}</p>
+                    <h3 className="font-black text-2xl tracking-tighter leading-none">{selectedVtr?.prefix}</h3>
+                    <p className="text-[11px] text-slate-400 font-bold uppercase tracking-widest">{selectedVtr?.name}</p>
                 </div>
-                <div className="px-3 py-2 rounded-xl bg-red-600 text-white font-black text-[10px] uppercase">{prontidao.label}</div>
+                <div className="w-16 h-8 rounded-full shadow-inner border border-slate-200" style={{ backgroundColor: prontidao.hex }}></div>
             </div>
-            <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-xl">
+            <div className="flex items-center gap-6 bg-slate-50 p-4 rounded-[2rem]">
                 <div className="flex-1">
-                    <label className="text-[8px] font-black uppercase text-slate-400">Data</label>
-                    <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-transparent font-black text-xs outline-none" />
+                    <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">DATA TURNO</label>
+                    <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-transparent font-black text-base outline-none cursor-pointer" />
                 </div>
                 <div className="flex-1">
-                    <div className="flex justify-between items-center mb-1"><span className="text-[8px] font-black uppercase">Progresso</span><span className="text-[9px] font-black">{progressPercent}%</span></div>
-                    <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden"><div className="h-full bg-red-600 transition-all" style={{ width: `${progressPercent}%` }}></div></div>
+                    <div className="flex justify-between items-center mb-2"><span className="text-[10px] font-black uppercase text-slate-400">PROGRESSO</span><span className="text-[11px] font-black text-blue-600">{progressPercent}%</span></div>
+                    <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden shadow-inner"><div className="h-full bg-blue-600 transition-all duration-700" style={{ width: `${progressPercent}%` }}></div></div>
                 </div>
             </div>
         </div>
-        <form onSubmit={handleSubmit} className="px-3 space-y-3">
-            {Object.entries(groupedItems).map(([comp, items]) => (
-                <div key={comp} className={`bg-white rounded-[2rem] border transition-all ${openCompartments[comp] ? 'border-red-500 shadow-xl' : 'border-slate-200 shadow-sm'}`}>
-                    <button type="button" onClick={() => setOpenCompartments(p => ({...p, [comp]: !p[comp]}))} className={`w-full p-5 flex justify-between items-center ${openCompartments[comp] ? 'bg-red-600 text-white rounded-t-[1.8rem]' : 'bg-white rounded-[1.8rem]'}`}>
-                        <div className="text-left"><span className="font-black text-sm uppercase tracking-tight">{comp}</span></div>
-                        <span className="text-xl">{openCompartments[comp] ? '▾' : '▸'}</span>
+
+        <form onSubmit={handleSubmit} className="px-5 space-y-6">
+            {(Object.entries(groupedItems) as [string, MaterialItem[]][]).map(([comp, items]) => (
+                <div key={comp} className={`bg-white rounded-[2.5rem] border-2 transition-all ${openCompartments[comp] ? 'border-blue-500 shadow-2xl' : 'border-slate-100 shadow-sm'}`}>
+                    <button type="button" onClick={() => setOpenCompartments(p => ({...p, [comp]: !p[comp]}))} className={`w-full p-8 flex justify-between items-center transition-all ${openCompartments[comp] ? 'bg-blue-600 text-white rounded-t-[2.3rem]' : 'bg-white rounded-[2.3rem]'}`}>
+                        <span className="font-black text-base uppercase tracking-widest">{comp}</span>
+                        <span className="text-3xl transition-transform" style={{ transform: openCompartments[comp] ? 'rotate(90deg)' : 'rotate(0)' }}>▸</span>
                     </button>
                     {openCompartments[comp] && (
-                        <div className="p-3 space-y-3 bg-slate-50/30">
-                            {items.map(item => (
-                                <div key={item.id} className="p-4 rounded-[1.5rem] border bg-white shadow-md">
-                                    <div className="flex justify-between items-start mb-4">
-                                        <span className="font-black text-slate-800 text-base flex-1">{item.name}</span>
-                                        <span className="text-[10px] bg-slate-900 text-white px-2 py-0.5 rounded-lg">QT: {item.quantity}</span>
+                        <div className="p-6 space-y-6 bg-slate-50/50">
+                            {(items as MaterialItem[]).map(item => (
+                                <div key={item.id} className="p-6 rounded-[2rem] border border-slate-200 bg-white shadow-sm">
+                                    <div className="flex justify-between items-start mb-6">
+                                        <div className="flex-1">
+                                            <span className="font-black text-slate-800 text-xl block leading-tight uppercase tracking-tighter">{item.name}</span>
+                                            {item.specification && <span className="text-xs font-bold text-slate-400 uppercase tracking-tight">{item.specification}</span>}
+                                        </div>
+                                        <span className="text-xs bg-slate-100 text-slate-800 px-4 py-2 rounded-xl font-black border border-slate-200 shadow-inner ml-4">QT: {item.quantity}</span>
                                     </div>
-                                    <div className="flex gap-2">
-                                        {['S', 'CN', 'NA'].map(s => (
-                                            <button key={s} type="button" onClick={() => setEntries(prev => ({ ...prev, [item.id]: { itemId: item.id, status: s as CheckStatus }}))} className={`flex-1 h-14 rounded-2xl font-black text-xs border transition-all ${entries[item.id]?.status === s ? 'bg-red-600 border-transparent text-white' : 'bg-white border-slate-200 text-slate-400'}`}>{s}</button>
-                                        ))}
+                                    <div className="flex gap-3">
+                                        {['S', 'CN', 'NA'].map(s => {
+                                          const isSelected = entries[item.id]?.status === s;
+                                          return (
+                                            <button key={s} type="button" onClick={() => setEntries(prev => ({ ...prev, [item.id]: { itemId: item.id, status: s as any }}))} className={`flex-1 h-16 rounded-2xl font-black text-base border-2 transition-all active:scale-95 ${isSelected ? (s === 'S' ? 'bg-emerald-500 border-emerald-500 text-white shadow-emerald-200' : s === 'CN' ? 'bg-red-500 border-red-500 text-white shadow-red-200' : 'bg-amber-500 border-amber-500 text-white shadow-amber-200') : 'bg-white border-slate-100 text-slate-300 hover:border-slate-300'} shadow-lg`}>
+                                              {s}
+                                            </button>
+                                          );
+                                        })}
                                     </div>
-                                    {(entries[item.id]?.status === 'CN' || entries[item.id]?.status === 'NA') && (
-                                        <textarea onChange={e => setEntries(prev => ({...prev, [item.id]: {...prev[item.id], observation: e.target.value}}))} className="w-full mt-4 p-3 border border-red-100 rounded-xl text-xs font-bold" placeholder="Observação obrigatória..." required value={entries[item.id]?.observation || ''} />
+                                    {entries[item.id]?.status === 'CN' && (
+                                        <textarea onChange={e => setEntries(prev => ({...prev, [item.id]: {...prev[item.id], observation: e.target.value}}))} className="w-full mt-6 p-5 border-2 border-red-100 rounded-3xl text-sm font-bold focus:border-red-500 outline-none bg-red-50/30" placeholder="Relate o defeito ou falta (Obrigatório)..." required value={entries[item.id]?.observation || ''} />
                                     )}
                                 </div>
                             ))}
@@ -220,16 +236,43 @@ const Checklist: React.FC<ChecklistProps> = ({ viaturas, checks, onComplete, onF
                     )}
                 </div>
             ))}
-            <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl space-y-6 mt-10 mb-20">
-                <input type="text" placeholder="Comandante da Vtr" value={commander} onChange={e => setCommander(e.target.value)} className="w-full p-4 border rounded-2xl font-black text-sm outline-none focus:border-red-500" required />
-                <div className="space-y-2">
-                    {responsibleList.map((r, i) => (
-                        <input key={i} type="text" placeholder={`Membro ${i+1}`} value={r} onChange={e => { const nl = [...responsibleList]; nl[i] = e.target.value; setResponsibleList(nl); }} className="w-full p-4 border rounded-2xl font-black text-sm outline-none focus:border-red-500" required />
-                    ))}
-                    <button type="button" onClick={() => setResponsibleList([...responsibleList, ''])} className="w-full py-3 border-2 border-dashed rounded-2xl text-[10px] font-black uppercase text-slate-400">+ Novo Membro</button>
+            
+            <div className="bg-slate-900 p-10 rounded-[3.5rem] shadow-2xl space-y-8 mt-16 mb-24 border border-white/5 relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent"></div>
+                <h4 className="text-sm font-black text-white/40 uppercase tracking-[0.4em] text-center border-b border-white/5 pb-6">Finalização da Conferência</h4>
+                
+                <div className="space-y-6">
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-white/50 ml-3">Comandante da Viatura</label>
+                        <input type="text" placeholder="POSTO/GRAD E NOME DE GUERRA" value={commander} onChange={e => setCommander(e.target.value)} className="w-full p-6 border-2 border-white/10 rounded-[1.5rem] font-black text-base outline-none focus:border-blue-500 uppercase tracking-widest bg-white/5 text-white shadow-inner" required />
+                    </div>
+                    <div className="space-y-4">
+                        <label className="text-[10px] font-black uppercase text-white/50 ml-3">Conferente(s)</label>
+                        {(responsibleList as string[]).map((r, i) => (
+                            <input key={i} type="text" placeholder={`CONFERENTE ${i+1}`} value={r} onChange={e => { const nl = [...responsibleList]; nl[i] = e.target.value; setResponsibleList(nl); }} className="w-full p-6 border-2 border-white/10 rounded-[1.5rem] font-black text-base outline-none focus:border-blue-500 uppercase bg-white/5 text-white shadow-inner" required />
+                        ))}
+                        <button type="button" onClick={() => setResponsibleList([...responsibleList, ''])} className="w-full py-4 border-2 border-dashed border-white/10 rounded-[1.5rem] text-xs font-black uppercase text-white/30 hover:text-white/60 hover:border-white/30 transition-all">+ Adicionar Auxiliar</button>
+                    </div>
                 </div>
-                {isJustificationRequired && <textarea value={justification} onChange={e => setJustification(e.target.value)} className="w-full p-4 border border-red-200 bg-red-50 rounded-2xl text-xs font-bold" placeholder="Justificativa Obrigatória..." required />}
-                <button type="submit" className="w-full py-6 bg-red-600 text-white rounded-[2rem] font-black text-base shadow-2xl disabled:opacity-50" disabled={progressPercent < 100}>Salvar Conferência Oficial</button>
+
+                {isJustificationRequired && <textarea value={justification} onChange={e => setJustification(e.target.value)} className="w-full p-6 border-2 border-amber-500/50 bg-amber-500/10 rounded-[1.5rem] text-sm font-bold focus:border-amber-500 outline-none text-amber-200" placeholder="JUSTIFICATIVA (CONFERÊNCIA RETROATIVA OU DUPLICADA NO TURNO)..." required />}
+                
+                <div className="space-y-4 mt-8">
+                    {selectedVtr?.status === ViaturaStatus.BAIXADA && (
+                        <button type="button" onClick={() => saveCheckInternal(true)} disabled={isSubmitting} className="w-full py-6 bg-red-700 text-white rounded-[1.5rem] font-black text-sm shadow-xl active:scale-95 transition-all uppercase tracking-widest border border-red-500/30">
+                            {isSubmitting ? 'Sincronizando...' : 'Confirmar Baixada (Auto NA)'}
+                        </button>
+                    )}
+                    {selectedVtr?.status === ViaturaStatus.RESERVA && (
+                        <button type="button" onClick={() => saveCheckInternal(true)} disabled={isSubmitting} className="w-full py-6 bg-amber-600 text-white rounded-[1.5rem] font-black text-sm shadow-xl active:scale-95 transition-all uppercase tracking-widest border border-amber-500/30">
+                            {isSubmitting ? 'Sincronizando...' : 'Confirmar Reserva (Auto NA)'}
+                        </button>
+                    )}
+
+                    <button type="submit" className="w-full py-8 bg-blue-600 text-white rounded-[2rem] font-black text-xl shadow-2xl disabled:opacity-50 active:scale-95 transition-all hover:brightness-110 uppercase tracking-widest" disabled={progressPercent < 100 || isSubmitting}>
+                    {isSubmitting ? 'Processando...' : 'Gravar Conferência'}
+                    </button>
+                </div>
             </div>
         </form>
     </div>

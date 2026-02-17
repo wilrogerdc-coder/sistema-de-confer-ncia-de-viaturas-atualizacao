@@ -7,7 +7,9 @@ import { INITIAL_VIATURAS, INITIAL_GBS, INITIAL_SUBS, INITIAL_POSTOS, DEFAULT_RO
  * Gerencia a comunicação entre o Frontend e o backend em Google Apps Script.
  */
 
-const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbzBMjhU8e0wHEZE7bybb9urPEIYY7lMlod0Fn2VMaiZ_4t0Z_b7Ifm0RPz4MqS_gOGafA/exec';
+// URL do Banco Operacional (Atualizada conforme solicitação do usuário)
+const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbzgw3C6AtmRpataS93D9XXRO4ssm-FnIdamtCCafPrZOQzmJYXNMQrdR14JiLMx4pNA_A/exec';
+// URL do Banco de Auditoria (Mantida conforme solicitação do usuário)
 const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbzrfHg2aBDIVs0SP6EBdyU5mopFHwMMLWK_wPEQg9NCSyH5ddwuRvOZNp7GsEUSmtKp/exec'; 
 
 const STORAGE_KEY_CACHE = 'vtr_system_cache_v1.7';
@@ -85,12 +87,26 @@ export const DataService = {
     return pendingFetch;
   },
 
+  /**
+   * Envia dados para a nuvem. 
+   * TÉCNICO: Utiliza 'text/plain' para evitar Preflight OPTIONS do CORS, 
+   * que não é suportado por Web Apps do Google Apps Script em requisições POST.
+   */
   async sendToCloud(type: DataType, action: 'SAVE' | 'DELETE', payload: any): Promise<void> {
     const { operationalUrl, auditUrl } = getDbConfig();
     const targetUrl = type === 'LOG' ? auditUrl : operationalUrl;
     try {
       const body = JSON.stringify({ type, action, ...payload });
-      await fetch(targetUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      // Usar text/plain evita o preflight request (OPTIONS) que causa erro em Apps Script
+      const response = await fetch(targetUrl, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
+        body 
+      });
+      
+      // Como Apps Script pode redirecionar, o fetch lida automaticamente se não houver erro de CORS.
+      // Se a conexão falhar aqui, o catch capturará.
+      console.log(`[DataService] Requisição de ${type} enviada via ${action}`);
       await new Promise(resolve => setTimeout(resolve, 300));
     } catch (e) { 
       console.error(`Erro ao enviar ${type}:`, e);
@@ -109,7 +125,7 @@ export const DataService = {
     };
     try {
       const body = JSON.stringify({ type: 'LOG', action: 'SAVE', ...entry });
-      await fetch(auditUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      await fetch(auditUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body });
     } catch (e) {}
   },
 
@@ -153,17 +169,13 @@ export const DataService = {
     return rawPostos.length > 0 ? rawPostos : INITIAL_POSTOS;
   },
   
-  /**
-   * Salva Unidade/Posto no banco de dados operacional.
-   * IMPORTANTE: Inclui o campo 'municipio' para relatórios.
-   */
   async savePosto(posto: Posto) { 
     await this.sendToCloud('POSTO', 'SAVE', {
       id: posto.id,
       subId: posto.subId,
       name: posto.name,
       classification: posto.classification,
-      municipio: posto.municipio || '' // Persiste explicitamente o município
+      municipio: posto.municipio || '' 
     }); 
   },
   
@@ -193,10 +205,6 @@ export const DataService = {
     }));
   },
 
-  /**
-   * Salva conferência de viatura.
-   * Converte o objeto de cabeçalho em string JSON para gravação estável na planilha.
-   */
   async saveCheck(check: InventoryCheck) { 
     const payload = {
       ...check,

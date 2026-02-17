@@ -5,11 +5,11 @@ import {
   generateInventoryPDF, 
   generateSummaryPDF, 
   generateNewsReportPDF,
-  generateEfficiencyReportPDF,
-  getHistoricalVtrStatus,
-  generateVtrDetailedMonthlyPDF
+  generateVtrDetailedMonthlyPDF,
+  generateManualDailyPDF,
+  generateManualMonthlyPDF
 } from '../utils/pdfGenerator';
-import { formatDateShort, getShiftReferenceDate, getProntidaoInfo } from '../utils/calendarUtils';
+import { formatDateShort, getShiftReferenceDate, getProntidaoInfo, getDaysInMonth } from '../utils/calendarUtils';
 
 interface ReportsProps {
   checks: InventoryCheck[];
@@ -18,29 +18,14 @@ interface ReportsProps {
   postos: Posto[];
 }
 
-/**
- * COMPONENTE: Reports
- * Interface de gestão de documentos e inteligência operacional.
- * Fornece filtros por Viatura, Unidade e Período Mensal.
- */
 const Reports: React.FC<ReportsProps> = ({ checks, viaturas, currentUser, postos }) => {
-  const [view, setView] = useState<'history' | 'monthly' | 'stats' | 'manual'>('history');
+  const [view, setView] = useState<'history' | 'monthly' | 'stats'>('history');
   const [filterVtr, setFilterVtr] = useState('');
-  
-  // O filtro de unidade inicia travado no posto do usuário, a menos que ele tenha permissões globais
-  const [filterPosto, setFilterPosto] = useState(
-    currentUser.scopeLevel === 'POSTO' ? currentUser.scopeId || '' : ''
-  );
-  
+  const [filterPosto, setFilterPosto] = useState(currentUser.scopeLevel === 'POSTO' ? currentUser.scopeId || '' : '');
   const [month, setMonth] = useState(new Date().toISOString().substring(0, 7));
 
-  // Determina se o usuário logado tem privilégios administrativos
   const isPrivileged = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.SUPER;
 
-  /**
-   * RESOLUÇÃO DE FROTA VISÍVEL:
-   * Filtra as viaturas disponíveis com base na Unidade selecionada.
-   */
   const visibleViaturas = useMemo(() => {
     return viaturas.filter(v => {
       if (filterPosto) return String(v.postoId) === String(filterPosto);
@@ -49,220 +34,204 @@ const Reports: React.FC<ReportsProps> = ({ checks, viaturas, currentUser, postos
     });
   }, [viaturas, filterPosto, currentUser]);
 
-  /**
-   * FILTRO DE HISTÓRICO:
-   * Processa a lista cronológica de checklists com base nos filtros de UI.
-   */
   const filteredHistory = useMemo(() => {
     const vtrIds = new Set(visibleViaturas.map(v => v.id));
-    return checks.filter(c => {
-      const belongsToVisibleFleet = vtrIds.has(c.viaturaId);
-      const matchesVtrFilter = filterVtr ? c.viaturaId === filterVtr : true;
-      return belongsToVisibleFleet && matchesVtrFilter;
-    }).reverse();
+    return checks.filter(c => vtrIds.has(c.viaturaId) && (filterVtr ? c.viaturaId === filterVtr : true)).reverse();
   }, [checks, visibleViaturas, filterVtr]);
 
-  /**
-   * Wrapper seguro para chamadas de PDF com feedback de erro.
-   */
   const safeReport = (fn: Function, ...args: any[]) => {
-    try { 
-      fn(...args); 
-    } catch (e: any) { 
-      console.error("Erro na geração de PDF:", e);
-      alert(`Erro ao processar o documento PDF: ${e.message}`); 
-    }
+    try { fn(...args); } catch (e: any) { alert(`Erro ao processar PDF: ${e.message}`); }
   };
 
-  /**
-   * GRADE MENSAL (Monthly View)
-   * Renderiza a visualização diária compacta de preenchimento.
-   */
   const renderMonthlyGrid = () => {
-    const days = 31;
-    const dayArray = Array.from({ length: days }, (_, i) => i + 1);
+    const totalDays = getDaysInMonth(month);
+    const dayArray = Array.from({ length: totalDays }, (_, i) => i + 1);
     
     return (
-      <div className="bg-white p-6 rounded-3xl border border-slate-200 overflow-x-auto space-y-8 animate-in fade-in shadow-sm">
-        <div>
-          <div className="flex flex-col lg:flex-row justify-between lg:items-end gap-4 mb-6">
+      <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 space-y-6 animate-in fade-in shadow-2xl relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-red-600 via-rose-500 to-red-700"></div>
+        
+        {/* TOOLBAR SUPERIOR DENSE */}
+        <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4">
             <div>
-              <h3 className="text-lg font-bold text-slate-800 tracking-tight">Mapa de Conferências Mensal</h3>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Grade diária de status operacional</p>
+              <h3 className="text-xl font-black text-slate-800 tracking-tighter uppercase leading-none">Mapa de Controle Mensal</h3>
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1.5">Histórico Analítico • Ciclo de {totalDays} Dias</p>
             </div>
-             <div className="flex flex-wrap items-center gap-4">
-               {isPrivileged && (
-                 <div className="flex items-center gap-2">
-                   <label className="text-[10px] font-black uppercase text-slate-500">Unidade:</label>
-                   <select value={filterPosto} onChange={e => { setFilterPosto(e.target.value); setFilterVtr(''); }} className="px-3 py-2 rounded-lg border border-slate-300 font-bold outline-none focus:border-red-500 text-xs bg-slate-50 transition-colors">
-                      <option value="">TODAS AS UNIDADES</option>
-                      {postos.map(p => <option key={p.id} value={p.id}>{p.classification || 'Posto'} {p.name}</option>)}
-                   </select>
-                 </div>
-               )}
-               <div className="flex items-center gap-2">
-                 <label className="text-[10px] font-black uppercase text-slate-500">Mês/Ano:</label>
-                 <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="px-3 py-2 rounded-lg border border-slate-300 font-bold outline-none focus:border-red-500 text-xs" />
+            
+            <div className="flex flex-wrap items-center gap-2">
+               <div className="flex gap-2 p-1.5 bg-slate-900 rounded-xl border border-white/10 mr-2 shadow-xl">
+                  <button onClick={() => { 
+                      const vtr = visibleViaturas.find(v => v.id === filterVtr);
+                      if (!vtr) return alert("Selecione uma viatura no filtro ou use os botões na grade.");
+                      safeReport(generateManualDailyPDF, vtr, postos);
+                  }} className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-[8px] font-black uppercase transition-all shadow-lg flex items-center gap-2">
+                    <span className="text-xs">🖨️</span> FICHA DIÁRIA
+                  </button>
+                  <button onClick={() => {
+                      const vtr = visibleViaturas.find(v => v.id === filterVtr);
+                      if (!vtr) return alert("Selecione uma viatura no filtro ou use os botões na grade.");
+                      safeReport(generateManualMonthlyPDF, vtr, month, postos);
+                  }} className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-[8px] font-black uppercase transition-all shadow-lg flex items-center gap-2">
+                    <span className="text-xs">📅</span> MAPA MENSAL
+                  </button>
                </div>
-             </div>
-          </div>
-          
-          <div className="border border-slate-200 rounded-xl overflow-hidden shadow-inner">
-            <table className="w-full text-[10px] border-collapse">
+               
+               {isPrivileged && (
+                 <select value={filterPosto} onChange={e => { setFilterPosto(e.target.value); setFilterVtr(''); }} className="px-3 py-2 rounded-xl border border-slate-200 font-black outline-none focus:border-red-600 text-[9px] uppercase bg-slate-50 shadow-inner transition-all">
+                    <option value="">FILTRAR UNIDADE</option>
+                    {postos.map(p => <option key={p.id} value={p.id}>{p.classification || 'Posto'} {p.name}</option>)}
+                 </select>
+               )}
+               <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="px-3 py-2 rounded-xl border border-slate-200 font-black outline-none focus:border-red-600 text-[9px] bg-white shadow-inner transition-all" />
+            </div>
+        </div>
+        
+        {/* CONTAINER COM SCROLL HABILITADO E FONTE REDUZIDA */}
+        <div className="border border-slate-100 rounded-2xl overflow-hidden shadow-inner bg-slate-50/50">
+          <div className="overflow-x-auto custom-scrollbar-horizontal scroll-smooth">
+            <table className="w-full text-[7px] border-collapse min-w-[1300px]">
               <thead>
-                <tr className="bg-slate-50">
-                  <th className="p-3 border-b border-r border-slate-200 font-bold text-left sticky left-0 z-10 text-slate-600 min-w-[140px] bg-slate-50 uppercase tracking-tighter">Viatura / Prefixo</th>
+                <tr className="bg-white/95 backdrop-blur-3xl">
+                  <th className="p-2.5 border-b border-r border-slate-100 font-black text-left sticky left-0 z-30 text-slate-700 min-w-[160px] bg-white uppercase tracking-tighter shadow-md">Viatura / Unidade</th>
                   {dayArray.map(d => (
-                    <th key={d} className="p-1 border-b border-r border-slate-100 font-semibold text-center min-w-[32px] text-slate-500">{d}</th>
+                    <th key={d} className="p-1 border-b border-r border-slate-100 font-black text-center min-w-[32px] text-slate-400">{d.toString().padStart(2, '0')}</th>
                   ))}
+                  <th className="p-2.5 border-b border-slate-100 font-black text-center text-red-600 uppercase tracking-widest bg-white">Opções</th>
                 </tr>
               </thead>
               <tbody>
-                {visibleViaturas.length === 0 ? (
-                  <tr><td colSpan={days + 1} className="p-10 text-center text-slate-400 font-bold uppercase tracking-widest">Nenhuma viatura localizada.</td></tr>
-                ) : visibleViaturas.map(v => (
-                  <tr key={v.id} className="hover:bg-slate-50/50">
-                    <td className="p-2 border-r border-b border-slate-100 font-medium flex flex-col bg-white sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-800 font-black">{v.prefix}</span>
-                        {/* BOTÃO DO MAPA DETALHADO (NOMES 90º) - Re-implementado com lógica avançada */}
-                        <button 
-                          onClick={() => safeReport(generateVtrDetailedMonthlyPDF, v, checks, month, true)} 
-                          className="text-blue-500 hover:scale-125 transition-all p-1" 
-                          title="Gerar Mapa Detalhado (Com Nomes 90º)"
-                        >
-                          📋
-                        </button>
+                {visibleViaturas.map(v => (
+                  <tr key={v.id} className="hover:bg-white transition-all group">
+                    <td className="p-2.5 border-r border-b border-slate-50 font-black flex flex-col bg-white/70 backdrop-blur-xl sticky left-0 z-20 shadow-md">
+                      <div className="flex justify-between items-center gap-1.5">
+                        <span className="text-slate-900 text-[10px] tracking-tighter uppercase leading-none group-hover:text-red-600 transition-colors">{v.prefix}</span>
+                        <button onClick={() => safeReport(generateVtrDetailedMonthlyPDF, v, checks, month, true, postos)} className="text-red-600 hover:scale-110 transition-all text-xs opacity-40 group-hover:opacity-100" title="Ver Espelho Digital">📋</button>
                       </div>
-                      <span className={`text-[8px] font-black uppercase mt-0.5 ${
-                          v.status === ViaturaStatus.OPERANDO ? 'text-green-600' :
-                          v.status === ViaturaStatus.RESERVA ? 'text-yellow-600' : 'text-red-600'
-                      }`}>{v.status}</span>
+                      <span className="text-[6px] font-bold text-slate-400 uppercase mt-0.5 tracking-widest">{postos.find(p => p.id === v.postoId)?.name || 'S/ UNID'}</span>
                     </td>
                     {dayArray.map(d => {
                       const dStr = `${month}-${d.toString().padStart(2, '0')}`;
                       const check = checks.find(c => c.viaturaId === v.id && getShiftReferenceDate(c.timestamp) === dStr);
+                      const shift = check ? getProntidaoInfo(new Date(check.timestamp)) : null;
                       const hasCN = check?.entries.some(e => e.status === 'CN');
-                      const histStatus = !check ? getHistoricalVtrStatus(v, dStr, checks) : null;
-                      const showStatusAsReason = !check && (histStatus === ViaturaStatus.RESERVA || histStatus === ViaturaStatus.BAIXADA);
-                      const reasonText = histStatus === ViaturaStatus.RESERVA ? 'RES' : 'BX';
-                      const shiftInfo = check ? getProntidaoInfo(new Date(check.timestamp)) : null;
                       
-                      const cellStyle = check && shiftInfo ? {
-                        backgroundColor: `color-mix(in srgb, ${shiftInfo.hex}, white 88%)`,
-                        color: hasCN ? '#dc2626' : shiftInfo.hex,
-                        borderColor: `color-mix(in srgb, ${shiftInfo.hex}, white 70%)`
-                      } : {};
+                      // Status histórico preservado: Reflete BX, RS ou OP (Checklist Normal)
+                      const historicalStatus = check?.viaturaStatusAtTime || ViaturaStatus.OPERANDO;
+                      const isBaixada = historicalStatus === ViaturaStatus.BAIXADA;
+                      const isReserva = historicalStatus === ViaturaStatus.RESERVA;
 
                       return (
-                        <td key={d} style={cellStyle} className={`p-1 border-b border-r border-slate-100 text-center font-black ${
-                          !check ? (showStatusAsReason ? 'text-slate-400 bg-slate-50' : 'text-slate-200') : ''
-                        }`}>
-                          {check ? (hasCN ? 'CN' : 'OK') : (showStatusAsReason ? reasonText : '—')}
+                        <td key={d} className={`p-1 border-b border-r border-slate-50 text-center font-black transition-all ${check ? 'animate-in fade-in' : 'text-slate-200'}`} style={check ? { backgroundColor: `color-mix(in srgb, ${shift?.hex}, transparent 96%)`, color: hasCN ? '#ef4444' : (isBaixada ? '#7f1d1d' : isReserva ? '#92400e' : shift?.hex) } : {}}>
+                          {check ? (
+                              isBaixada ? 'BX' : isReserva ? 'RS' : (hasCN ? 'CN' : 'OK')
+                          ) : '—'}
                         </td>
                       );
                     })}
+                    <td className="p-2 border-b border-slate-50 text-center">
+                        <div className="flex justify-center gap-1.5 opacity-20 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => safeReport(generateManualDailyPDF, v, postos)} className="px-2 py-1 bg-slate-100 hover:bg-red-600 hover:text-white rounded-md text-[6px] font-black uppercase transition-all">DIÁRIO</button>
+                            <button onClick={() => safeReport(generateManualMonthlyPDF, v, month, postos)} className="px-2 py-1 bg-slate-100 hover:bg-slate-900 hover:text-white rounded-md text-[6px] font-black uppercase transition-all">MENSAL</button>
+                        </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </div>
+        <div className="flex flex-wrap justify-center gap-6 pt-3 border-t border-slate-50">
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm"></span><span className="text-[8px] font-black uppercase text-slate-500 tracking-widest">OK: Operando</span></div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm"></span><span className="text-[8px] font-black uppercase text-slate-500 tracking-widest">CN: Com Novidade</span></div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-950 shadow-sm"></span><span className="text-[8px] font-black uppercase text-slate-500 tracking-widest">BX: Baixada</span></div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-600 shadow-sm"></span><span className="text-[8px] font-black uppercase text-slate-500 tracking-widest">RS: Reserva</span></div>
+        </div>
       </div>
     );
   };
   
   return (
-    <div className="space-y-6">
-      {/* Abas de Navegação de Relatórios */}
-      <div className="flex bg-white p-1 rounded-xl border border-slate-200 w-fit shadow-sm overflow-x-auto max-w-full">
-        <button onClick={() => setView('history')} className={`whitespace-nowrap px-6 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${view === 'history' ? 'bg-slate-800 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>Histórico</button>
-        <button onClick={() => setView('monthly')} className={`whitespace-nowrap px-6 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${view === 'monthly' ? 'bg-slate-800 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>Mapa Mensal</button>
-        <button onClick={() => setView('stats')} className={`whitespace-nowrap px-6 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${view === 'stats' ? 'bg-slate-800 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>Eficiência</button>
+    <div className="space-y-6 animate-in fade-in duration-700 pb-20">
+      <div className="flex bg-white p-1.5 rounded-2xl border border-slate-200 w-fit shadow-lg">
+        <button onClick={() => setView('history')} className={`px-8 py-2.5 rounded-xl text-[9px] font-black uppercase transition-all duration-500 ${view === 'history' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}>Histórico Cronológico</button>
+        <button onClick={() => setView('monthly')} className={`px-8 py-2.5 rounded-xl text-[9px] font-black uppercase transition-all duration-500 ${view === 'monthly' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}>Mapa Mensal Inteligente</button>
       </div>
 
       {view === 'history' && (
-        <div className="space-y-6 animate-in fade-in">
-          <div className="bg-white p-6 rounded-3xl border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4 shadow-sm">
-            <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-[2rem] border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4 shadow-lg relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-red-600"></div>
+            <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
                 {isPrivileged && (
-                  <select value={filterPosto} onChange={e => { setFilterPosto(e.target.value); setFilterVtr(''); }} className="px-4 py-3 rounded-xl border border-slate-300 font-bold text-xs uppercase bg-slate-50 outline-none focus:border-red-500 transition-all">
-                     <option value="">Todas as Unidades</option>
+                  <select value={filterPosto} onChange={e => { setFilterPosto(e.target.value); setFilterVtr(''); }} className="px-5 py-3 rounded-xl border-2 border-slate-50 font-black text-[9px] uppercase bg-slate-50 outline-none focus:border-red-600 shadow-inner">
+                     <option value="">TODAS AS UNIDADES</option>
                      {postos.map(p => <option key={p.id} value={p.id}>{p.classification || 'Posto'} {p.name}</option>)}
                   </select>
                 )}
-                <select value={filterVtr} onChange={e => setFilterVtr(e.target.value)} className="w-full md:w-72 px-4 py-3 rounded-xl border border-slate-300 font-bold text-xs uppercase bg-slate-50 outline-none focus:border-red-500 transition-all">
-                   <option value="">Filtrar Viatura</option>
+                <select value={filterVtr} onChange={e => setFilterVtr(e.target.value)} className="px-5 py-3 rounded-xl border-2 border-slate-50 font-black text-[9px] uppercase bg-slate-50 outline-none focus:border-red-600 shadow-inner min-w-[250px]">
+                   <option value="">FILTRAR POR PREFIXO</option>
                    {visibleViaturas.map(v => <option key={v.id} value={v.id}>{v.prefix}</option>)}
                 </select>
             </div>
             <div className="flex gap-2">
-              {/* BOTÃO: RESUMO DE NOVIDADES */}
-              <button onClick={() => safeReport(generateNewsReportPDF, checks, viaturas, month, true)} className="px-6 py-3 bg-red-50 text-red-600 rounded-xl font-black text-[10px] uppercase border border-red-100 hover:bg-red-100 transition-colors">Resumo Novidades</button>
-              <button onClick={() => safeReport(generateSummaryPDF, filteredHistory, viaturas, true)} className="px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-black text-[10px] uppercase border border-slate-200">Resumo Tela</button>
-              <button onClick={() => safeReport(generateSummaryPDF, filteredHistory, viaturas)} className="px-6 py-3 bg-red-600 text-white rounded-xl font-black text-[10px] uppercase shadow-lg shadow-red-100 hover:bg-red-700 transition-colors">Baixar PDF</button>
+              <button onClick={() => safeReport(generateNewsReportPDF, checks, viaturas, month, true, filterVtr || undefined)} className="px-6 py-3 bg-rose-50 text-rose-600 rounded-xl font-black text-[9px] uppercase border border-rose-100 hover:bg-rose-100 shadow-md transition-all active:scale-95">Resumo Novidades</button>
+              <button onClick={() => safeReport(generateSummaryPDF, filteredHistory, viaturas)} className="px-6 py-3 bg-slate-900 text-white rounded-xl font-black text-[9px] uppercase shadow-xl hover:brightness-110 transition-all active:scale-95">Histórico Geral PDF</button>
             </div>
           </div>
 
-          <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+          <div className="bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-2xl">
             <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50 border-b border-slate-100">
-                <tr>
-                  <th className="px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest">Data Turno</th>
-                  <th className="px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest">Viatura</th>
-                  <th className="px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest text-right">Ações</th>
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest">DATA TURNO</th>
+                  <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">PRONTIDÃO</th>
+                  <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">STATUS VTR</th>
+                  <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest">VIATURA</th>
+                  <th className="px-8 py-5 text-[9px] font-black uppercase text-slate-400 tracking-widest text-right">CONFERÊNCIA</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {filteredHistory.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} className="px-6 py-12 text-center text-slate-300 font-bold uppercase text-[10px] tracking-[0.2em]">Nenhum registro localizado.</td>
-                  </tr>
-                ) : (
-                  filteredHistory.map(check => {
-                    const vtrObj = viaturas.find(v => v.id === check.viaturaId);
-                    return (
-                      <tr key={check.id} className="hover:bg-slate-50 transition-colors group">
-                        <td className="px-6 py-4 font-black text-xs text-slate-700">{formatDateShort(getShiftReferenceDate(check.timestamp))}</td>
-                        <td className="px-6 py-4 text-xs font-black text-slate-900">{vtrObj?.prefix || 'INDISPONÍVEL'}</td>
-                        <td className="px-6 py-4 text-right flex justify-end gap-2">
-                          <button 
-                            onClick={() => safeReport(generateInventoryPDF, check, vtrObj!, true)} 
-                            className="px-4 py-2 bg-slate-50 text-slate-600 rounded-lg text-[10px] font-black uppercase border border-slate-200 hover:bg-white hover:text-blue-600 transition-all"
-                          >
-                            Visualizar
-                          </button>
-                          <button 
-                            onClick={() => safeReport(generateInventoryPDF, check, vtrObj!)} 
-                            className="px-4 py-2 bg-slate-900 text-white rounded-lg text-[10px] font-black uppercase shadow-md hover:brightness-110 active:scale-95 transition-all"
-                          >
-                            Download
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
+                {filteredHistory.map(check => {
+                  const vtrObj = viaturas.find(v => v.id === check.viaturaId);
+                  const shiftInfo = getProntidaoInfo(check.timestamp);
+                  const vtrStatus = check.viaturaStatusAtTime || ViaturaStatus.OPERANDO;
+                  return (
+                    <tr key={check.id} className="hover:bg-slate-50 transition-all group">
+                      <td className="px-8 py-5 font-black text-xs text-slate-800 tracking-tight">{formatDateShort(getShiftReferenceDate(check.timestamp))}</td>
+                      <td className="px-8 py-5 text-center">
+                          <span className="px-4 py-2 rounded-full text-[8px] font-black uppercase text-white shadow-xl" style={{ backgroundColor: shiftInfo.hex }}>{check.shiftColor}</span>
+                      </td>
+                      <td className="px-8 py-5 text-center">
+                          <span className={`px-3 py-1.5 rounded-lg text-[7px] font-black uppercase border shadow-sm ${
+                            vtrStatus === ViaturaStatus.OPERANDO ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 
+                            vtrStatus === ViaturaStatus.RESERVA ? 'bg-amber-50 text-amber-600 border-amber-100' : 
+                            'bg-red-50 text-red-600 border-red-100'
+                          }`}>
+                            {vtrStatus === ViaturaStatus.OPERANDO ? 'OP' : vtrStatus === ViaturaStatus.RESERVA ? 'RS' : 'BX'}
+                          </span>
+                      </td>
+                      <td className="px-8 py-5 text-sm font-black text-slate-900 tracking-tighter uppercase leading-none">{vtrObj?.prefix}</td>
+                      <td className="px-8 py-5 text-right">
+                        <div className="flex justify-end gap-2">
+                           <button onClick={() => safeReport(generateInventoryPDF, check, vtrObj!, true)} className="px-5 py-2 bg-white text-slate-600 rounded-lg text-[8px] font-black uppercase border-2 border-slate-100 hover:border-red-600 hover:text-red-600 transition-all shadow-sm">Ver Espelho</button>
+                           <button onClick={() => safeReport(generateInventoryPDF, check, vtrObj!)} className="w-8 h-8 bg-slate-900 text-white rounded-lg flex items-center justify-center hover:scale-110 transition-all shadow-xl text-lg">📥</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+            {filteredHistory.length === 0 && (
+                <div className="py-20 text-center">
+                    <div className="text-3xl opacity-10 mb-3">🔍</div>
+                    <p className="text-slate-300 font-black uppercase tracking-[0.3em] text-[10px]">Nenhum registro localizado no servidor.</p>
+                </div>
+            )}
           </div>
         </div>
       )}
-
       {view === 'monthly' && renderMonthlyGrid()}
-      
-      {view === 'stats' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in slide-in-from-bottom-4 duration-500">
-          <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-4">
-            <h4 className="text-lg font-black text-slate-800 uppercase tracking-tighter">Indicadores de Eficiência</h4>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">Relatório comparativo de preenchimento vinculando a frota operando à sua unidade atual.</p>
-            <div className="pt-4 flex gap-2">
-              <button onClick={() => safeReport(generateEfficiencyReportPDF, checks, visibleViaturas, month, true, postos)} className="flex-1 py-3 bg-green-50 text-green-700 rounded-xl font-black text-[10px] uppercase hover:bg-green-100 transition-colors">Visualizar PDF</button>
-              <button onClick={() => safeReport(generateEfficiencyReportPDF, checks, visibleViaturas, month, false, postos)} className="flex-1 py-3 bg-green-600 text-white rounded-xl font-black text-[10px] uppercase shadow-lg shadow-green-100 hover:bg-green-700 transition-colors">Baixar Relatório</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

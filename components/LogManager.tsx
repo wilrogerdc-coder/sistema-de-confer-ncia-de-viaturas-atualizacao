@@ -178,7 +178,10 @@ const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh })
             </div>
             <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm">
                <h4 className="text-[10px] font-black text-slate-400 uppercase mb-6 tracking-widest text-center">Engajamento por Operador</h4>
-               <div className="h-64 w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={intelligenceData.barData} layout="vertical"><XAxis type="number" hide /><YAxis dataKey="name" type="category" width={80} tick={{fontSize: 9, fontBold: true}} /><Tooltip contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} /><Bar dataKey="count" fill="#3b82f6" radius={[0, 10, 10, 0]} barSize={15} /></BarChart></ResponsiveContainer></div>
+               <div className="h-64 w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={intelligenceData.barData} layout="vertical"><XAxis type="number" hide />
+                {/* Fixed invalid fontBold prop by using fontWeight: "bold" */}
+                <YAxis dataKey="name" type="category" width={80} tick={{fontSize: 9, fontWeight: "bold"}} />
+                <Tooltip contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }} /><Bar dataKey="count" fill="#3b82f6" radius={[0, 10, 10, 0]} barSize={15} /></BarChart></ResponsiveContainer></div>
             </div>
           </div>
         </div>
