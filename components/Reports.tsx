@@ -193,13 +193,16 @@ const Reports: React.FC<ReportsProps> = ({ checks, viaturas, currentUser, postos
               <tbody className="divide-y divide-slate-50">
                 {filteredHistory.map(check => {
                   const vtrObj = viaturas.find(v => v.id === check.viaturaId);
-                  const shiftInfo = getProntidaoInfo(check.timestamp);
+                  // Mapeamento de cor da prontidão baseado no rótulo salvo (Garante fidelidade visual ao turno operacional)
+                  const shiftHex = check.shiftColor === 'Verde' ? '#10b981' : 
+                                  check.shiftColor === 'Amarela' ? '#f59e0b' : 
+                                  check.shiftColor === 'Azul' ? '#2563eb' : '#64748b';
                   const vtrStatus = check.viaturaStatusAtTime || ViaturaStatus.OPERANDO;
                   return (
                     <tr key={check.id} className="hover:bg-slate-50 transition-all group">
                       <td className="px-8 py-5 font-black text-xs text-slate-800 tracking-tight">{formatDateShort(getShiftReferenceDate(check.timestamp))}</td>
                       <td className="px-8 py-5 text-center">
-                          <span className="px-4 py-2 rounded-full text-[8px] font-black uppercase text-white shadow-xl" style={{ backgroundColor: shiftInfo.hex }}>{check.shiftColor}</span>
+                          <span className="px-4 py-2 rounded-full text-[8px] font-black uppercase text-white shadow-xl" style={{ backgroundColor: shiftHex }}>{check.shiftColor}</span>
                       </td>
                       <td className="px-8 py-5 text-center">
                           <span className={`px-3 py-1.5 rounded-lg text-[7px] font-black uppercase border shadow-sm ${
