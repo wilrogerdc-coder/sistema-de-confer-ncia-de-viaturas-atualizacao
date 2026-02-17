@@ -1,4 +1,3 @@
-
 import React, { useMemo, useState } from 'react';
 import { User, PermissionKey, GB, Subgrupamento, Posto } from '../types';
 import { APP_NAME } from '../constants';
@@ -23,9 +22,10 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
     const t = [];
     if (permissions.includes('view_dashboard')) t.push({ id: 'dashboard', label: 'Início', icon: '📊' });
     if (permissions.includes('perform_checklist')) t.push({ id: 'checklist', label: 'Checklist', icon: '📝' });
-    if (permissions.includes('manage_fleet')) t.push({ id: 'inventory', label: 'Pátio', icon: '🚒' });
+    // REGRA: Menu renomeado de 'Pátio' para 'VIATURAS' conforme solicitado pelo usuário.
+    if (permissions.includes('manage_fleet')) t.push({ id: 'inventory', label: 'VIATURAS', icon: '🚒' });
     if (permissions.includes('view_reports')) t.push({ id: 'reports', label: 'Relatórios', icon: '📄' });
-    if (permissions.includes('manage_users')) t.push({ id: 'users', label: 'Operadores', icon: '👥' });
+    if (permissions.includes('manage_users')) t.push({ id: 'users', label: 'Usuários', icon: '👥' });
     if (permissions.includes('manage_hierarchy')) t.push({ id: 'hierarchy', label: 'Unidades', icon: '🏛️' });
     if (permissions.includes('view_audit_logs')) t.push({ id: 'logs', label: 'Auditoria', icon: '🛡️' });
     if (permissions.includes('manage_database')) t.push({ id: 'database', label: 'Cloud', icon: '📡' });
@@ -104,6 +104,11 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
         >
           Encerrar Sessão
         </button>
+
+        <div className="pt-2 text-center">
+            {/* REGRA: Créditos de desenvolvimento no rodapé do menu lateral */}
+            <p className="text-[8px] font-black uppercase tracking-[0.4em] text-white/20">Cavalieri - 2026</p>
+        </div>
       </div>
     </>
   );

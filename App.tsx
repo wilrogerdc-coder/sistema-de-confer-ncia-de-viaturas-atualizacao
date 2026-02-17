@@ -122,7 +122,8 @@ const App: React.FC = () => {
   const handleLogin = (loggedUser: User) => {
     setUser(loggedUser);
     DataService.saveLog({ userId: loggedUser.id, userName: loggedUser.name, action: 'LOGIN', details: `Acesso via: ${navigator.platform}` });
-    if (loggedUser.role === UserRole.USER) setActiveTab('checklist'); else setActiveTab('dashboard');
+    // Alteração: Independente do perfil, a aba inicial após o login será sempre o Dashboard (Início)
+    setActiveTab('dashboard');
   };
   
   const handleLogout = () => {

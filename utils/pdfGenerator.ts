@@ -35,13 +35,13 @@ const addPageNumbers = (doc: any) => {
   doc.setFont('helvetica', 'italic');
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    // Alteração: Removida a frase "Desenvolvido por Cavalieri - 2026"
     doc.text(`Página ${i} de ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
   }
 };
 
 /**
- * RELATÓRIO 1: ESPELHO INDIVIDUAL DE CONFERÊNCIA REALIZADA
+ * RELATÓRIO 1: ESPELHO INDIVIDUAL DE CONFERÊNCIA REALIZADA (Relatório do Checklist)
+ * Responsável por exibir o resultado final de uma conferência de materiais.
  */
 export const generateInventoryPDF = (check: InventoryCheck, viatura: Viatura, isPreview: boolean = false) => {
   const JsPDF = getJsPDF();
@@ -49,7 +49,7 @@ export const generateInventoryPDF = (check: InventoryCheck, viatura: Viatura, is
   const header = check.headerDetails || DEFAULT_HEADER;
   const shiftInfo = getProntidaoInfo(check.timestamp);
   
-  // Lógica de Cores por Status (BX = Vermelho, RS = Laranja)
+  // REGRA DE CORES: Define a cor do cabeçalho baseada na prontidão ou status da viatura (Baixada/Reserva)
   let rgb = hexToRgb(shiftInfo.hex);
   if (check.viaturaStatusAtTime === ViaturaStatus.BAIXADA) {
     rgb = [185, 28, 28]; // Red-700
@@ -61,26 +61,55 @@ export const generateInventoryPDF = (check: InventoryCheck, viatura: Viatura, is
   doc.setFont('helvetica', 'bold'); 
   let startY = 15;
   
-  [header.corpoBombeiros, header.unidade, header.subgrupamento, header.pelotao].forEach(line => {
-    doc.text(safeUpper(line), 105, startY, { align: "center" });
-    startY += 5;
+  /**
+   * REGRA DE CABEÇALHO:
+   * Removidas informações de Grupamento (GB) e Subgrupamento (SGB).
+   * Mantidas as instâncias superiores (Secretaria, PM e CB).
+   */
+  const headerLines = [
+    header.secretaria,
+    header.policiaMilitar,
+    header.corpoBombeiros
+  ];
+
+  headerLines.forEach(line => {
+    if (line) {
+      doc.text(safeUpper(line), 105, startY, { align: "center" });
+      startY += 5;
+    }
   });
   
-  startY += 10;
-  doc.setFontSize(11);
-  doc.setTextColor(rgb[0], rgb[1], rgb[2]);
-  doc.text(`CONFERÊNCIA DE MATERIAIS: ${safeUpper(viatura.prefix)}`, 105, startY, { align: "center" });
+  startY += 12;
   
+  /**
+   * REGRA DE TÍTULO:
+   * 1. Exibir apenas 'CONFERÊNCIA DE MATERIAIS' em destaque.
+   * 2. Exibir o prefixo da viatura logo abaixo em fonte maior.
+   * 3. Mantém a aplicação dinâmica de cores (rgb) conforme o status.
+   */
+  doc.setTextColor(rgb[0], rgb[1], rgb[2]);
+  doc.setFontSize(16); // Fonte maior para o título principal
+  doc.text("CONFERÊNCIA DE MATERIAIS", 105, startY, { align: "center" });
+  
+  startY += 8;
+  doc.setFontSize(14); // Fonte destacada para o prefixo
+  doc.text(safeUpper(viatura.prefix), 105, startY, { align: "center" });
+  
+  // Reset de estilos para o corpo do relatório
   doc.setFontSize(8);
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'normal');
-  doc.text(`PRONTIDÃO: ${safeUpper(shiftInfo.label)}`, 15, startY + 10);
-  doc.text(`REALIZADO EM: ${new Date(check.timestamp).toLocaleString('pt-BR')}`, 15, startY + 15);
-  doc.text(`CONFERENTE: ${safeUpper(check.responsibleNames.join(' / '))}`, 15, startY + 20);
-  doc.text(`COMANDANTE DA VTR: ${safeUpper(check.commanderName)}`, 15, startY + 25);
-  doc.text(`STATUS DA VTR: ${safeUpper(check.viaturaStatusAtTime || ViaturaStatus.OPERANDO)}`, 15, startY + 30);
+  doc.text(`PRONTIDÃO: ${safeUpper(shiftInfo.label)}`, 15, startY + 12);
+  doc.text(`REALIZADO EM: ${new Date(check.timestamp).toLocaleString('pt-BR')}`, 15, startY + 17);
+  doc.text(`CONFERENTE: ${safeUpper(check.responsibleNames.join(' / '))}`, 15, startY + 22);
+  doc.text(`COMANDANTE DA VTR: ${safeUpper(check.commanderName)}`, 15, startY + 27);
+  doc.text(`STATUS DA VTR: ${safeUpper(check.viaturaStatusAtTime || ViaturaStatus.OPERANDO)}`, 15, startY + 32);
 
   const tableData: any[] = [];
+  /**
+   * SNAPSHOT DE MATERIAIS:
+   * Agrupamento por compartimento utilizando os itens salvos no momento do check.
+   */
   const grouped = (check.snapshot || viatura.items).reduce((acc, item) => {
     const comp = item.compartment || 'GERAL';
     if (!acc[comp]) acc[comp] = [];
@@ -92,12 +121,18 @@ export const generateInventoryPDF = (check: InventoryCheck, viatura: Viatura, is
     tableData.push([{ content: safeUpper(comp), colSpan: 4, styles: { fillColor: [240, 240, 240], fontStyle: 'bold' } }]);
     items.forEach(item => {
       const entry = check.entries.find(e => e.itemId === item.id);
-      tableData.push([item.quantity.toString().padStart(2, '0'), `${item.name}${item.specification ? ' (' + item.specification + ')' : ''}`, { content: entry?.status || '-', styles: { halign: 'center', fontStyle: 'bold', textColor: entry?.status === 'CN' ? [200, 0, 0] : [0,0,0] } }, entry?.observation || '']);
+      tableData.push([
+        item.quantity.toString().padStart(2, '0'), 
+        `${item.name}${item.specification ? ' (' + item.specification + ')' : ''}`, 
+        { content: entry?.status || '-', styles: { halign: 'center', fontStyle: 'bold', textColor: entry?.status === 'CN' ? [200, 0, 0] : [0,0,0] } }, 
+        entry?.observation || ''
+      ]);
     });
   });
 
+  // Geração da Tabela Automática
   (doc as any).autoTable({
-    startY: startY + 35,
+    startY: startY + 37,
     head: [['Qt', 'Material / Equipamento', 'Status', 'Observações']],
     body: tableData,
     theme: 'grid',
@@ -261,6 +296,7 @@ export const generateManualMonthlyPDF = (viatura: Viatura, monthYear: string, po
 
   const grouped = viatura.items.reduce((acc, item) => {
       const comp = item.compartment || 'GERAL';
+      // Fix: Correctly initialize the accumulator for a new compartment
       if (!acc[comp]) acc[comp] = [];
       acc[comp].push(item);
       return acc;

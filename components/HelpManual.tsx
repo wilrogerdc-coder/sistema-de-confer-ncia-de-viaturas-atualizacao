@@ -134,7 +134,11 @@ const HelpManual: React.FC = () => {
 
         <footer className="mt-24 pt-10 border-t border-slate-100 flex flex-col items-center gap-6">
             <div className="px-6 py-2 bg-slate-900 text-white rounded-full text-[9px] font-black uppercase tracking-[0.4em]">Gestão Operacional de Materiais</div>
-            <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Corporativo • Uso Restrito • Auditoria Ativa</p>
+            <div className="text-center space-y-2">
+                <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Corporativo • Uso Restrito • Auditoria Ativa</p>
+                {/* REGRAS DE CRÉDITOS: Implementação dos créditos de desenvolvimento solicitados */}
+                <p className="text-[11px] font-black text-slate-800 uppercase tracking-[0.2em] animate-in fade-in slide-in-from-bottom-2 duration-1000">Desenvolvido por CAVALIERI 2026</p>
+            </div>
         </footer>
       </div>
     </div>

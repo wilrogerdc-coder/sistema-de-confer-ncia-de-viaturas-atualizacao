@@ -187,10 +187,6 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               {loading ? 'Autenticando...' : 'Acessar Terminal'}
             </button>
           </form>
-          
-          <div className="text-center text-[9px] text-slate-300 font-bold uppercase tracking-widest">
-             Área Militar Restrita • Auditoria Ativa
-          </div>
         </div>
       </div>
     </div>

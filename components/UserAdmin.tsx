@@ -15,8 +15,8 @@ interface UserAdminProps {
 
 /**
  * COMPONENTE: UserAdmin
- * Gerencia o cadastro e o escopo de permissões dos operadores.
- * Regras: Permite edição local, subgrupamento ou GB conforme hierarquia.
+ * Gerencia o cadastro, o escopo de atuação e as PERMISSÕES ADICIONAIS dos usuários.
+ * Implementa renomeação para 'Usuários' conforme diretriz sênior.
  */
 const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveUser, onDeleteUser, currentUser }) => {
   const [isAdding, setIsAdding] = useState(false);
@@ -84,15 +84,25 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
     setEditingId(null);
   };
 
+  // REGRAS DE PERMISSÃO: Toggle granular para permissões adicionais.
+  const handleTogglePermission = (p: PermissionKey) => {
+    const current = formData.customPermissions || [];
+    if (current.includes(p)) {
+      setFormData({ ...formData, customPermissions: current.filter(x => x !== p) });
+    } else {
+      setFormData({ ...formData, customPermissions: [...current, p] });
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
           <div>
-            <h3 className="text-lg font-bold text-slate-800 tracking-tighter uppercase leading-none">Gerenciamento de Operadores</h3>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Total Filtrado: {filteredUsers.length} Membros</p>
+            <h3 className="text-lg font-bold text-slate-800 tracking-tighter uppercase leading-none">Gerenciamento de Usuários</h3>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Total Filtrado: {filteredUsers.length} Usuários</p>
           </div>
-          <button onClick={() => setIsAdding(true)} className="bg-red-600 text-white px-6 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg hover:bg-red-700 transition-all">+ Novo Operador</button>
+          <button onClick={() => setIsAdding(true)} className="bg-red-600 text-white px-6 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg hover:bg-red-700 transition-all">+ Novo Usuário</button>
         </div>
         
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 pt-2 border-t border-slate-50">
@@ -123,7 +133,7 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
 
       {isAdding && (
         <div className="bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl text-white animate-in zoom-in-95">
-          <h4 className="font-black mb-6 uppercase tracking-widest text-red-400">{editingId ? 'Editar Operador' : 'Nova Credencial de Acesso'}</h4>
+          <h4 className="font-black mb-6 uppercase tracking-widest text-red-400">{editingId ? 'Editar Usuário' : 'Nova Credencial de Acesso'}</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase text-slate-400">Nome / Graduação</label>
@@ -164,8 +174,27 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
               </div>
             )}
           </div>
+
+          {/* REGRAS DE EDIÇÃO: Permissões Adicionais para o Usuário */}
+          <div className="border-t border-slate-800 pt-6 mb-8">
+            <h5 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-4">Permissões Adicionais (Customizadas)</h5>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {(Object.keys(PERMISSION_LABELS) as PermissionKey[]).map((key) => (
+                <label key={key} className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-xl border border-slate-700 cursor-pointer hover:bg-slate-800 transition-colors">
+                  <input 
+                    type="checkbox" 
+                    checked={formData.customPermissions?.includes(key)} 
+                    onChange={() => handleTogglePermission(key)}
+                    className="w-4 h-4 accent-red-600"
+                  />
+                  <span className="text-[10px] font-bold text-slate-300 uppercase">{PERMISSION_LABELS[key]}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
           <div className="flex gap-2">
-            <button onClick={handleCreateOrUpdate} className="bg-red-600 px-8 py-3 rounded-xl font-black uppercase text-xs shadow-lg hover:brightness-110 transition-all">Salvar Operador</button>
+            <button onClick={handleCreateOrUpdate} className="bg-red-600 px-8 py-3 rounded-xl font-black uppercase text-xs shadow-lg hover:brightness-110 transition-all">Salvar Usuário</button>
             <button onClick={resetForm} className="bg-slate-700 px-8 py-3 rounded-xl font-black uppercase text-xs transition-all">Cancelar</button>
           </div>
         </div>
@@ -175,14 +204,14 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
         <table className="w-full text-left border-collapse">
           <thead className="bg-slate-50 border-b border-slate-100">
             <tr>
-              <th className="px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest">Membro</th>
+              <th className="px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest">Usuário</th>
               <th className="px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">Permissão / Unidade</th>
               <th className="px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest text-right">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filteredUsers.length === 0 ? (
-              <tr><td colSpan={3} className="p-10 text-center text-slate-300 uppercase font-black text-xs">Nenhum operador localizado.</td></tr>
+              <tr><td colSpan={3} className="p-10 text-center text-slate-300 uppercase font-black text-xs">Nenhum usuário localizado.</td></tr>
             ) : filteredUsers.map(u => (
               <tr key={u.id} className="hover:bg-slate-50 transition-colors group">
                 <td className="px-6 py-4">

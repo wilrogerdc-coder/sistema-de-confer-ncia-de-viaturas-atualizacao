@@ -1,7 +1,7 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Viatura, InventoryCheck, ProntidaoColor, Posto, User, ViaturaStatus, UserRole, Subgrupamento, GB, LogEntry } from '../types';
-import { ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend, LineChart, Line, AreaChart, Area } from 'recharts';
+import { ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend, LineChart, Line } from 'recharts';
 import { getProntidaoInfo, formatFullDate, getShiftReferenceDate } from '../utils/calendarUtils';
 
 interface DashboardProps {
@@ -14,35 +14,70 @@ interface DashboardProps {
   currentUser: User;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, currentUser }) => {
+const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, gbs, currentUser }) => {
   const [chartScope, setChartScope] = useState<'weekly' | 'monthly' | 'yearly'>('weekly');
   const [widgetOrder, setWidgetOrder] = useState<string[]>(['stats-turno', 'stats-prontidao', 'produtividade', 'pendencias']);
   const [draggedWidget, setDraggedWidget] = useState<string | null>(null);
 
+  // Estados de Filtro de Escopo
+  const [filterGb, setFilterGb] = useState<string>('');
+  const [filterSgb, setFilterSgb] = useState<string>('');
+  const [filterPosto, setFilterPosto] = useState<string>('');
+
+  // Inicializa filtros baseados no escopo do usuário
+  useEffect(() => {
+    if (currentUser.scopeLevel === 'GB') setFilterGb(currentUser.scopeId || '');
+    if (currentUser.scopeLevel === 'SGB') {
+      const sub = subs.find(s => s.id === currentUser.scopeId);
+      setFilterGb(sub?.gbId || '');
+      setFilterSgb(currentUser.scopeId || '');
+    }
+    if (currentUser.scopeLevel === 'POSTO') {
+      const posto = postos.find(p => p.id === currentUser.scopeId);
+      const sub = subs.find(s => s.id === posto?.subId);
+      setFilterGb(sub?.gbId || '');
+      setFilterSgb(posto?.subId || '');
+      setFilterPosto(currentUser.scopeId || '');
+    }
+  }, [currentUser, subs, postos]);
+
   const currentProntidao = getProntidaoInfo(new Date());
 
-  const headerInfo = useMemo(() => {
-    if (currentUser.role === UserRole.SUPER) return { name: 'CENTRO DE COMANDO GLOBAL', label: 'MONITORAMENTO CLOUD MASTER' };
-    if (currentUser.role === UserRole.ADMIN) return { name: 'GESTÃO E AUDITORIA REGIONAL', label: 'AUDITORIA DE ATIVOS E FROTA' };
-    const unitName = postos.find(p => p.id === currentUser.scopeId || p.id === currentUser.postoId)?.name || 'UNIDADE OPERACIONAL';
-    return { name: unitName.toUpperCase(), label: 'SESSÃO OPERACIONAL ATIVA' };
-  }, [currentUser, postos]);
+  const isPrivileged = currentUser.role === UserRole.SUPER || currentUser.role === UserRole.ADMIN;
 
-  const visibleViaturas = useMemo(() => {
-    if (currentUser.role === UserRole.SUPER) return viaturas;
-    const scopeId = currentUser.scopeId || currentUser.postoId;
-    return viaturas.filter(v => v.postoId === scopeId);
-  }, [viaturas, currentUser]);
+  /**
+   * Lógica de Filtragem de Viaturas por Escopo Selecionado
+   */
+  const filteredViaturas = useMemo(() => {
+    return viaturas.filter(v => {
+      const p = postos.find(posto => posto.id === v.postoId);
+      const s = subs.find(sub => sub.id === p?.subId);
+      
+      const matchGb = filterGb ? s?.gbId === filterGb : true;
+      const matchSgb = filterSgb ? p?.subId === filterSgb : true;
+      const matchPosto = filterPosto ? v.postoId === filterPosto : true;
+      
+      return matchGb && matchSgb && matchPosto;
+    });
+  }, [viaturas, postos, subs, filterGb, filterSgb, filterPosto]);
+
+  /**
+   * Lógica de Filtragem de Checks por Escopo Selecionado
+   */
+  const filteredChecks = useMemo(() => {
+    const vtrIds = new Set(filteredViaturas.map(v => v.id));
+    return checks.filter(c => vtrIds.has(c.viaturaId));
+  }, [checks, filteredViaturas]);
 
   const operativeViaturas = useMemo(() => 
-    visibleViaturas.filter(v => v.status === ViaturaStatus.OPERANDO)
-  , [visibleViaturas]);
+    filteredViaturas.filter(v => v.status === ViaturaStatus.OPERANDO)
+  , [filteredViaturas]);
 
   const operationalTodayStr = getShiftReferenceDate(new Date());
 
   const checksToday = useMemo(() => {
-      return checks.filter(c => getShiftReferenceDate(c.timestamp) === operationalTodayStr);
-  }, [checks, operationalTodayStr]);
+      return filteredChecks.filter(c => getShiftReferenceDate(c.timestamp) === operationalTodayStr);
+  }, [filteredChecks, operationalTodayStr]);
 
   const statsToday = useMemo(() => {
       const conferred = operativeViaturas.filter(v => checksToday.some(c => c.viaturaId === v.id)).length;
@@ -54,15 +89,15 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, current
   }, [operativeViaturas, checksToday]);
 
   const readinessStats = useMemo(() => {
-      const verde = checks.filter(c => c.shiftColor === 'Verde').length;
-      const amarela = checks.filter(c => c.shiftColor === 'Amarela').length;
-      const azul = checks.filter(c => c.shiftColor === 'Azul').length;
+      const verde = filteredChecks.filter(c => c.shiftColor === 'Verde').length;
+      const amarela = filteredChecks.filter(c => c.shiftColor === 'Amarela').length;
+      const azul = filteredChecks.filter(c => c.shiftColor === 'Azul').length;
       return [
           { name: 'Verde', value: verde, color: '#10b981' },
           { name: 'Amarela', value: amarela, color: '#f59e0b' },
           { name: 'Azul', value: azul, color: '#2563eb' }
       ].filter(d => d.value > 0);
-  }, [checks]);
+  }, [filteredChecks]);
 
   const productivityData = useMemo(() => {
     let length = 7;
@@ -74,7 +109,7 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, current
             const d = new Date();
             d.setMonth(d.getMonth() - (11 - i));
             const monthStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-            const monthChecks = checks.filter(c => getShiftReferenceDate(c.timestamp).startsWith(monthStr));
+            const monthChecks = filteredChecks.filter(c => getShiftReferenceDate(c.timestamp).startsWith(monthStr));
             return {
                 name: d.toLocaleString('pt-BR', { month: 'short' }).toUpperCase(),
                 verde: monthChecks.filter(c => c.shiftColor === 'Verde').length,
@@ -87,7 +122,7 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, current
             const d = new Date();
             d.setDate(d.getDate() - (length - 1 - i));
             const dateStr = getShiftReferenceDate(d);
-            const dayChecks = checks.filter(c => getShiftReferenceDate(c.timestamp) === dateStr);
+            const dayChecks = filteredChecks.filter(c => getShiftReferenceDate(c.timestamp) === dateStr);
             return {
                 name: dateStr.split('-').reverse().slice(0, 2).join('/'),
                 verde: dayChecks.filter(c => c.shiftColor === 'Verde').length,
@@ -96,7 +131,7 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, current
             };
         });
     }
-  }, [checks, chartScope]);
+  }, [filteredChecks, chartScope]);
 
   const activeStyle = useMemo(() => {
     const varName = currentProntidao.color === ProntidaoColor.VERDE ? '--readiness-verde' : currentProntidao.color === ProntidaoColor.AMARELA ? '--readiness-amarela' : '--readiness-azul';
@@ -120,6 +155,13 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, current
     setDraggedWidget(null);
   };
 
+  const headerLabel = useMemo(() => {
+    if (filterPosto) return postos.find(p => p.id === filterPosto)?.name.toUpperCase() || 'UNIDADE';
+    if (filterSgb) return subs.find(s => s.id === filterSgb)?.name.toUpperCase() || 'SUBGRUPAMENTO';
+    if (filterGb) return gbs.find(g => g.id === filterGb)?.name.toUpperCase() || 'GRUPAMENTO';
+    return 'VISÃO GLOBAL MASTER';
+  }, [filterGb, filterSgb, filterPosto, gbs, subs, postos]);
+
   const renderWidget = (id: string) => {
     switch (id) {
       case 'stats-turno':
@@ -139,14 +181,14 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, current
             </div>
             <div className="mt-2 text-center">
                 <p className="text-xl font-black text-emerald-500 leading-none">{statsToday[0].value} / {operativeViaturas.length}</p>
-                <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest mt-1">Status Turno</p>
+                <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest mt-1">Concluído</p>
             </div>
           </div>
         );
       case 'stats-prontidao':
         return (
           <div key={id} draggable onDragStart={() => handleDragStart(id)} onDragOver={handleDragOver} onDrop={() => handleDrop(id)} className="bg-white p-6 rounded-[2rem] shadow-lg border border-slate-100 flex flex-col items-center cursor-move transition-transform active:scale-95">
-            <h3 className="text-xs font-black text-slate-800 tracking-tighter uppercase mb-3 text-center">Total Acumulado</h3>
+            <h3 className="text-xs font-black text-slate-800 tracking-tighter uppercase mb-3 text-center">Distribuição Histórica</h3>
             <div className="h-44 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -159,8 +201,8 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, current
                 </ResponsiveContainer>
             </div>
             <div className="mt-2 text-center">
-                <p className="text-xl font-black text-slate-800 leading-none">{checks.length}</p>
-                <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest mt-1">Registros Cloud</p>
+                <p className="text-xl font-black text-slate-800 leading-none">{filteredChecks.length}</p>
+                <p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest mt-1">Registros Filtrados</p>
             </div>
           </div>
         );
@@ -168,7 +210,7 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, current
         return (
           <div key={id} draggable onDragStart={() => handleDragStart(id)} onDragOver={handleDragOver} onDrop={() => handleDrop(id)} className="xl:col-span-2 bg-white p-6 rounded-[2rem] shadow-lg border border-slate-100 overflow-hidden relative cursor-move transition-transform active:scale-[0.98]">
             <div className="flex justify-between items-center mb-4 border-b border-slate-50 pb-3">
-                <h3 className="text-sm font-black text-slate-800 tracking-tighter uppercase">Produtividade Sincronizada</h3>
+                <h3 className="text-sm font-black text-slate-800 tracking-tighter uppercase">Produtividade no Escopo</h3>
                 <div className="flex bg-slate-100 p-1 rounded-lg">
                   {['weekly', 'monthly', 'yearly'].map(s => (
                     <button key={s} onClick={(e) => { e.stopPropagation(); setChartScope(s as any); }} className={`px-2 py-1 rounded-md text-[7px] font-black uppercase transition-all ${chartScope === s ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>
@@ -199,8 +241,8 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, current
               <div className="flex items-center gap-4">
                   <div className="w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center text-red-500 text-2xl shadow-inner">⚠️</div>
                   <div>
-                    <h3 className="text-xl font-black text-slate-800 tracking-tighter uppercase">Pendências Operacionais ({operativeViaturas.length} OP)</h3>
-                    <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">Viaturas operando pendentes de conferência no sistema</p>
+                    <h3 className="text-xl font-black text-slate-800 tracking-tighter uppercase">Pendências ({operativeViaturas.length} Ativas)</h3>
+                    <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">Viaturas aguardando conferência no escopo selecionado</p>
                   </div>
               </div>
             </div>
@@ -208,13 +250,13 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, current
               {operativeViaturas.filter(v => !checksToday.some(c => c.viaturaId === v.id)).length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center py-10 opacity-90">
                   <div className="w-16 h-16 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center text-3xl mb-3 shadow-inner border-2 border-emerald-100">✓</div>
-                  <p className="text-slate-800 font-black text-base px-6 uppercase tracking-tighter">Pátio operacional em conformidade.</p>
+                  <p className="text-slate-800 font-black text-base px-6 uppercase tracking-tighter">100% de conformidade operacional.</p>
                   <p className="text-[7px] font-bold text-emerald-500 uppercase tracking-[0.3em] mt-2 bg-emerald-50 px-4 py-1 rounded-full">Sistema em Dia</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                   {operativeViaturas.filter(v => !checksToday.some(c => c.viaturaId === v.id)).map(v => {
-                      const vtrChecks = checks.filter(c => c.viaturaId === v.id).sort((a,b) => b.timestamp.localeCompare(a.timestamp));
+                      const vtrChecks = filteredChecks.filter(c => c.viaturaId === v.id).sort((a,b) => b.timestamp.localeCompare(a.timestamp));
                       const lastDate = vtrChecks.length > 0 ? new Date(vtrChecks[0].timestamp) : null;
                       const diffDays = lastDate ? Math.ceil(Math.abs(new Date().getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)) : '∞';
                       return (
@@ -242,6 +284,55 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, current
 
   return (
     <div className="space-y-6 animate-in fade-in duration-700 pb-20">
+      
+      {/* FILTROS DE ESCOPO PARA USUÁRIOS PRIVILEGIADOS */}
+      {isPrivileged && (
+        <div className="bg-white p-4 rounded-[1.5rem] shadow-sm border border-slate-200 flex flex-wrap items-center gap-4 transition-all hover:shadow-md">
+            <div className="flex items-center gap-2 px-3 border-r border-slate-100">
+                <span className="text-lg">🔍</span>
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Filtrar Visão</span>
+            </div>
+            
+            <select 
+              value={filterGb} 
+              onChange={e => { setFilterGb(e.target.value); setFilterSgb(''); setFilterPosto(''); }}
+              className="bg-slate-50 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-tight outline-none focus:ring-2 focus:ring-red-100 transition-all border border-slate-100"
+            >
+              <option value="">TODOS OS GB</option>
+              {gbs.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+
+            <select 
+              value={filterSgb} 
+              onChange={e => { setFilterSgb(e.target.value); setFilterPosto(''); }}
+              disabled={!filterGb}
+              className="bg-slate-50 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-tight outline-none focus:ring-2 focus:ring-red-100 transition-all border border-slate-100 disabled:opacity-30"
+            >
+              <option value="">TODOS OS SGB</option>
+              {subs.filter(s => s.gbId === filterGb).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+
+            <select 
+              value={filterPosto} 
+              onChange={e => setFilterPosto(e.target.value)}
+              disabled={!filterSgb}
+              className="bg-slate-50 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-tight outline-none focus:ring-2 focus:ring-red-100 transition-all border border-slate-100 disabled:opacity-30"
+            >
+              <option value="">TODAS AS UNIDADES</option>
+              {postos.filter(p => p.subId === filterSgb).map(p => <option key={p.id} value={p.id}>{p.classification} {p.name}</option>)}
+            </select>
+
+            {(filterGb || filterSgb || filterPosto) && (
+                <button 
+                  onClick={() => { setFilterGb(''); setFilterSgb(''); setFilterPosto(''); }}
+                  className="ml-auto text-[9px] font-black text-red-600 uppercase tracking-widest hover:underline"
+                >
+                  Limpar Filtros
+                </button>
+            )}
+        </div>
+      )}
+
       {/* HEADER DENSE */}
       <div 
         className="relative overflow-hidden rounded-[2rem] p-8 text-white shadow-2xl transition-all duration-1000 border border-white/10" 
@@ -256,15 +347,15 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, current
               </div>
               <span className="w-2 h-2 rounded-full bg-white animate-pulse shadow-[0_0_8px_#fff]"></span>
             </div>
-            <h1 className="text-3xl md:text-4xl font-black tracking-tighter uppercase leading-[0.85] drop-shadow-xl">{headerInfo.name}</h1>
+            <h1 className="text-3xl md:text-4xl font-black tracking-tighter uppercase leading-[0.85] drop-shadow-xl">{headerLabel}</h1>
             <p className="text-sm font-medium opacity-80 uppercase tracking-[0.2em] ml-1">{formatFullDate(new Date())}</p>
           </div>
           
           <div className="grid grid-cols-3 gap-4 w-full lg:w-auto">
             {[
               { label: 'Operando', val: operativeViaturas.length },
-              { label: 'Reserva', val: visibleViaturas.filter(v => v.status === ViaturaStatus.RESERVA).length },
-              { label: 'Baixadas', val: visibleViaturas.filter(v => v.status === ViaturaStatus.BAIXADA).length }
+              { label: 'Reserva', val: filteredViaturas.filter(v => v.status === ViaturaStatus.RESERVA).length },
+              { label: 'Baixadas', val: filteredViaturas.filter(v => v.status === ViaturaStatus.BAIXADA).length }
             ].map(stat => (
               <div key={stat.label} className="bg-white/10 backdrop-blur-2xl rounded-2xl p-4 text-center border border-white/10 shadow-inner hover:bg-white/20 transition-all cursor-default group">
                 <p className="text-[8px] font-black uppercase opacity-60 mb-1.5 tracking-widest">{stat.label}</p>
