@@ -13,7 +13,7 @@ const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbzgw3C6AtmRpata
  * REGRA: URL do Banco de Auditoria (Logs de Sistema)
  * Configurada para a nova implantação conforme colunas: ID, TIMESTAMP, USER_ID, USER_NAME, ACTION, DETAILS.
  */
-const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbx5tjEc52xxa3TsBiIfqmIRPy8wu_xZrkwo_ROT3uq9yT05Dl23axX7vYMaKk3a7AEDEw/exec'; 
+const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbzyjlL_75LKaoRNqLivp14q9nhZl0Khxwl_IXbcju4UpltOiQkwgRiwVT8-qJOg0SKf/exec'; 
 
 const STORAGE_KEY_CACHE = 'vtr_system_cache_v1.7';
 const STORAGE_KEY_CONFIG = 'vtr_db_config_v1';
@@ -89,6 +89,7 @@ export const DataService = {
     const targetUrl = type === 'LOG' ? auditUrl : operationalUrl;
     try {
       const body = JSON.stringify({ type, action, ...payload });
+      // REGRA: O GAS exige text/plain para requisições cross-origin simples sem preflight
       await fetch(targetUrl, { 
         method: 'POST', 
         headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
@@ -104,7 +105,7 @@ export const DataService = {
 
   /**
    * REGRA DE GRAVAÇÃO: Salva log no banco de auditoria.
-   * Mapeia as chaves para os cabeçalhos EXATOS da planilha: ID, TIMESTAMP, USER_ID, USER_NAME, ACTION, DETAILS.
+   * IMPORTANTE: As chaves devem ser em MAIÚSCULO para corresponder aos cabeçalhos da planilha (ID, TIMESTAMP...).
    */
   async saveLog(log: Omit<LogEntry, 'id' | 'timestamp'>): Promise<void> {
     const { auditUrl } = getDbConfig();
@@ -118,7 +119,7 @@ export const DataService = {
     };
     try {
       const body = JSON.stringify({ type: 'LOG', action: 'SAVE', ...entry });
-      // REGRA: Envio em POST usando mode: no-cors para evitar falhas de preflight e Content-Type text/plain
+      // REGRA: Usamos POST com mode 'no-cors' para garantir o envio sem interrupções de Preflight no GAS
       await fetch(auditUrl, { 
         method: 'POST', 
         headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
@@ -126,13 +127,13 @@ export const DataService = {
         mode: 'no-cors'
       });
     } catch (e) {
-      console.error("Erro ao persistir log:", e);
+      console.error("Erro ao persistir log operacional:", e);
     }
   },
 
   /**
    * REGRA DE RECUPERAÇÃO: Captura dados da planilha 'logs'.
-   * Realiza a normalização entre as chaves Maiúsculas (Planilha) e Minúsculas (Aplicação).
+   * Normaliza os nomes das colunas (MAIÚSCULO) para as propriedades minúsculas do sistema.
    */
   async getLogs(): Promise<LogEntry[]> {
     const { auditUrl } = getDbConfig();
@@ -144,9 +145,10 @@ export const DataService = {
         
         if (response.ok) {
             const data = await response.json();
+            // REGRA: Verifica se retornou uma lista válida
             const rawList = Array.isArray(data) ? data : [];
             
-            // REGRA: Mapeia colunas da planilha (MAIÚSCULO) para o modelo do App (minúsculo)
+            // REGRA: Mapeamento de chaves (Normalização)
             return rawList.map((l: any) => ({
                 id: String(l.ID || l.id || '-'),
                 userId: String(l.USER_ID || l.userId || ''),
@@ -157,7 +159,7 @@ export const DataService = {
             }));
         }
     } catch (e) {
-      console.error("Erro ao buscar logs no servidor:", e);
+      console.error("Erro ao buscar logs no servidor remoto:", e);
     }
     return [];
   },
@@ -266,10 +268,6 @@ export const DataService = {
     await this.sendToCloud('SETTINGS', 'SAVE', payload); 
   },
 
-  /**
-   * REGRA DE RESET: Limpa todos os dados no servidor e no cache local.
-   * Utiliza o tipo 'CLEAR_ALL' definido no protocolo de comunicação com o Google Apps Script.
-   */
   async clearDatabase() {
     await this.sendToCloud('CLEAR_ALL', 'DELETE', {});
     localStorage.removeItem(STORAGE_KEY_CACHE);

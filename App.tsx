@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { User, UserRole, Viatura, InventoryCheck, GB, Subgrupamento, Posto, LogEntry, RolePermissions, PermissionKey, Theme } from './types';
+import { User, UserRole, Viatura, InventoryCheck, GB, Subgrupamento, Posto, LogEntry, RolePermissions, PermissionKey, Theme, ViaturaStatus } from './types';
 import { DataService } from './services/dataService';
 import { DEFAULT_ROLE_PERMISSIONS, DEFAULT_THEME } from './constants';
 import { applyThemeToDocument } from './utils/themeUtils';
@@ -121,13 +121,14 @@ const App: React.FC = () => {
   // Handlers de Login e Logout
   const handleLogin = (loggedUser: User) => {
     setUser(loggedUser);
-    DataService.saveLog({ userId: loggedUser.id, userName: loggedUser.name, action: 'LOGIN', details: `Acesso via: ${navigator.platform}` });
-    // Alteração: Independente do perfil, a aba inicial após o login será sempre o Dashboard (Início)
+    // REGRA: Gravando username no campo userId para rastreabilidade em gráficos de auditoria
+    DataService.saveLog({ userId: loggedUser.username, userName: loggedUser.name, action: 'LOGIN', details: `Acesso via: ${navigator.platform}` });
     setActiveTab('dashboard');
   };
   
   const handleLogout = () => {
-    if (user) DataService.saveLog({ userId: user.id, userName: user.name, action: 'LOGOUT', details: 'Sessão encerrada.' });
+    // REGRA: Gravando username no campo userId conforme solicitação de auditoria
+    if (user) DataService.saveLog({ userId: user.username, userName: user.name, action: 'LOGOUT', details: 'Sessão encerrada.' });
     setUser(null);
     setActiveTab('dashboard');
     setIsFullScreen(false);
@@ -141,9 +142,9 @@ const App: React.FC = () => {
       await DataService.saveViatura(vtr);
       if (user) {
         if (oldVtr && oldVtr.status !== vtr.status) {
-           await DataService.saveLog({ userId: user.id, userName: user.name, action: 'STATUS_VTR', details: `${vtr.prefix}: Status alterado de ${oldVtr.status} para ${vtr.status}` });
+           await DataService.saveLog({ userId: user.username, userName: user.name, action: 'STATUS_VTR', details: `${vtr.prefix}: Status alterado de ${oldVtr.status} para ${vtr.status}` });
         } else {
-           await DataService.saveLog({ userId: user.id, userName: user.name, action: 'SAVE_VTR', details: `Configuração da Vtr ${vtr.prefix} atualizada.` });
+           await DataService.saveLog({ userId: user.username, userName: user.name, action: 'SAVE_VTR', details: `Configuração da Vtr ${vtr.prefix} atualizada.` });
         }
       }
       await loadData();
@@ -154,7 +155,7 @@ const App: React.FC = () => {
     const vtr = viaturas.find(v => v.id === id);
     setIsLoading(true);
     await DataService.deleteViatura(id);
-    if (user) await DataService.saveLog({ userId: user.id, userName: user.name, action: 'DEL_VTR', details: `Vtr removida da frota: ${vtr?.prefix}` });
+    if (user) await DataService.saveLog({ userId: user.username, userName: user.name, action: 'DEL_VTR', details: `Vtr removida da frota: ${vtr?.prefix}` });
     await loadData();
   };
 
@@ -163,7 +164,7 @@ const App: React.FC = () => {
     await DataService.saveCheck(check);
     if (user) {
         const vtr = viaturas.find(v => v.id === check.viaturaId);
-        await DataService.saveLog({ userId: user.id, userName: user.name, action: 'CHECKLIST', details: `Conferência realizada: ${vtr?.prefix} (Status: ${check.viaturaStatusAtTime})` });
+        await DataService.saveLog({ userId: user.username, userName: user.name, action: 'CHECKLIST', details: `Conferência realizada: ${vtr?.prefix} (Status: ${check.viaturaStatusAtTime})` });
     }
     await loadData();
     setIsFullScreen(false); 
@@ -172,7 +173,7 @@ const App: React.FC = () => {
   const handleSaveUser = async (u: User) => {
     setIsLoading(true);
     await DataService.saveUser(u);
-    if (user) await DataService.saveLog({ userId: user.id, userName: user.name, action: 'SAVE_USER', details: `Cadastro/Edição de usuário: ${u.username}` });
+    if (user) await DataService.saveLog({ userId: user.username, userName: user.name, action: 'SAVE_USER', details: `Cadastro/Edição de usuário: ${u.username}` });
     await loadData();
   };
 
@@ -181,7 +182,7 @@ const App: React.FC = () => {
     if (['Cavalieri', 'admin20gb'].includes(u?.username || '')) return;
     setIsLoading(true);
     await DataService.deleteUser(id);
-    if (user) await DataService.saveLog({ userId: user.id, userName: user.name, action: 'DEL_USER', details: `Usuário removido: ${u?.username}` });
+    if (user) await DataService.saveLog({ userId: user.username, userName: user.name, action: 'DEL_USER', details: `Usuário removido: ${u?.username}` });
     await loadData();
   };
 
@@ -223,10 +224,8 @@ const App: React.FC = () => {
       
       {activeTab === 'checklist' && currentUserPermissions.includes('perform_checklist') && <Checklist viaturas={visibleViaturas} checks={checks} onComplete={handleCompleteCheck} onFullScreenChange={setIsFullScreen} postos={postos} subs={subs} gbs={gbs} />}
       
-      {/* Adicionado currentUser={user} para corrigir erro de tipo: Property 'currentUser' is missing */}
       {activeTab === 'inventory' && currentUserPermissions.includes('manage_fleet') && <InventoryManager viaturas={visibleViaturas} postos={postos} onSaveViatura={handleSaveViatura} onDeleteViatura={handleDeleteViatura} currentUser={user} />}
       
-      {/* Correção: Enviamos a lista completa de viaturas para permitir filtragem interna no Reports p/ Admins */}
       {activeTab === 'reports' && currentUserPermissions.includes('view_reports') && <Reports checks={checks} viaturas={viaturas} currentUser={user} postos={postos} />}
       
       {activeTab === 'users' && currentUserPermissions.includes('manage_users') && <UserAdmin users={users} gbs={gbs} subs={subs} postos={postos} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} currentUser={user} />}

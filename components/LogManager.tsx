@@ -15,12 +15,12 @@ interface LogManagerProps {
 
 /**
  * COMPONENTE: LogManager (NÍVEL SÊNIOR)
- * Gerencia a auditoria do sistema e a visualização de rastreabilidade.
+ * Responsável por exibir os logs de auditoria e métricas operacionais.
  * 
  * REGRAS IMPLEMENTADAS:
- * 1. ORDENAÇÃO: Garante que os registros mais recentes (última linha da planilha) apareçam no topo.
- * 2. SINCRONIZAÇÃO: Botão dinâmico que informa o status de conexão com o Banco.
- * 3. ABA DADOS BRUTOS: Exibe chaves normalizadas garantindo que o mapeamento ID, TIMESTAMP funcionou.
+ * 1. SINCRONIZAÇÃO: Botão dinâmico que informa o status de conexão com o Banco.
+ * 2. ORDENAÇÃO: Garante que os registros mais recentes apareçam no topo da timeline.
+ * 3. ABA DADOS BRUTOS: Exibe os campos normalizados para auditoria técnica.
  */
 const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh }) => {
   const [filterUser, setFilterUser] = useState('');
@@ -30,7 +30,7 @@ const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh })
 
   /**
    * REGRA DE INTEGRIDADE: Ordenação Cronológica Inversa
-   * Garante a visualização do log mais recente primeiro na tela.
+   * Garante que o evento mais recente (última linha da planilha) seja o primeiro da lista.
    */
   const safeLogs = useMemo(() => {
     if (!Array.isArray(logs)) return [];
@@ -42,8 +42,8 @@ const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh })
   }, [logs]);
 
   /**
-   * REGRA: Atualização de Dados Remotos
-   * Força a recarga dos dados vindo da URL de Auditoria configurada no DataService.
+   * REGRA: Atualização Forçada
+   * Invoca a recarga de dados do App.tsx e fornece feedback visual.
    */
   const handleRefresh = async () => {
     if (onRefresh) {
@@ -51,17 +51,14 @@ const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh })
       try {
         await onRefresh();
       } catch (error) {
-        console.error("Erro na sincronização de auditoria:", error);
+        console.error("Falha ao sincronizar logs:", error);
       } finally {
-        // Delay visual para confirmação tátil do status sincronizado
-        setTimeout(() => setIsSyncing(false), 1000);
+        // Delay visual para confirmação tátil do usuário
+        setTimeout(() => setIsSyncing(false), 800);
       }
     }
   };
 
-  /**
-   * REGRA DE FILTRAGEM: Busca por Usuário ou Tipo de Ação.
-   */
   const filteredLogs = useMemo(() => {
     return safeLogs.filter(log => {
       const matchUser = filterUser ? (log.userName || '').toLowerCase().includes(filterUser.toLowerCase()) : true;
@@ -72,6 +69,7 @@ const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh })
 
   /**
    * REGRA DE INTELIGÊNCIA: Processamento de Gráficos (Dashboard Técnico).
+   * RECORREÇÃO: Alterado agrupamento de Operadores para utilizar o Nome Completo/Graduação (userName).
    */
   const intelligenceData = useMemo(() => {
     if (!safeLogs.length) return { pieData: [], barData: [] };
@@ -81,14 +79,16 @@ const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh })
     
     safeLogs.forEach(log => {
       const action = (log.action || '').toUpperCase();
-      const userName = log.userName || 'Sistema';
+      // REGRA: Utilizando userName para o agrupamento do gráfico (Ex: SD PM FULANO)
+      // Isso garante que a contagem seja associada ao nome de exibição solicitado.
+      const userDisplayName = log.userName || 'Sistema'; 
 
       if (['LOGIN', 'LOGOUT'].includes(action)) categoryCount['ACESSO']++;
       else if (action === 'CHECKLIST') categoryCount['OPERACIONAL']++;
       else if (action.includes('USER') || action.includes('PARAMS') || action.includes('DB')) categoryCount['ADMINISTRATIVO']++;
       else categoryCount['FROTA']++;
       
-      userCount[userName] = (userCount[userName] || 0) + 1;
+      userCount[userDisplayName] = (userCount[userDisplayName] || 0) + 1;
     });
 
     const pieData = [
@@ -99,14 +99,17 @@ const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh })
     ].filter(d => d.value > 0);
 
     const barData = Object.entries(userCount)
-      .map(([name, count]) => ({ name: name.split(' ')[0], full: name, count }))
+      .map(([name, count]) => ({ 
+        name: name, // Exibe o nome completo com graduação conforme solicitado (Ex: SD PM FULANO)
+        full: name, 
+        count 
+      }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 8);
 
     return { pieData, barData };
   }, [safeLogs]);
 
-  // BLOQUEIO DE SEGURANÇA: Restrito ao Super Usuário Master.
   if (currentUser.role !== UserRole.SUPER) {
     return (
       <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 shadow-sm animate-in fade-in duration-500">
@@ -120,7 +123,7 @@ const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh })
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
       
-      {/* HEADER: COMANDO E STATUS DO BANCO */}
+      {/* HEADER DE COMANDO */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-900 text-white p-6 rounded-[2.5rem] shadow-xl border border-slate-800 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl -mr-16 -mt-16"></div>
         <div className="relative z-10 flex items-center gap-4">
@@ -129,36 +132,33 @@ const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh })
             <h3 className="text-xl font-black uppercase tracking-tighter leading-none">Console de Auditoria</h3>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1.5 flex items-center gap-2">
                 <span className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-amber-500 animate-pulse' : 'bg-green-500'}`}></span>
-                {isSyncing ? 'ATUALIZANDO BANCO...' : `BANCO SINCRONIZADO • ${safeLogs.length} EVENTOS`}
+                {isSyncing ? 'Sincronizando Banco de Dados...' : `Banco Conectado • ${safeLogs.length} Eventos`}
             </p>
           </div>
         </div>
         <div className="flex gap-2 relative z-10">
-            {/* REGRA: Botão de Sincronização em tempo real */}
             <button 
                 onClick={handleRefresh} 
                 disabled={isSyncing}
                 className={`px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-[10px] font-black uppercase border border-white/10 transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2 ${isSyncing ? 'ring-2 ring-amber-500/50' : ''}`}
             >
-              {isSyncing ? '🔄 Sincronizando...' : '📥 Sincronizar Logs'}
+              {isSyncing ? '🔄 Carregando...' : '📥 Atualizar Histórico'}
             </button>
-            <button onClick={() => generateAuditLogPDF(filteredLogs)} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl text-[10px] font-black uppercase shadow-lg transition-all active:scale-95">Relatório PDF</button>
+            <button onClick={() => generateAuditLogPDF(filteredLogs)} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl text-[10px] font-black uppercase shadow-lg transition-all active:scale-95">Exportar PDF</button>
         </div>
       </div>
 
-      {/* NAVEGAÇÃO INTERNA */}
       <div className="flex flex-wrap p-1 bg-white rounded-2xl border border-slate-200 w-fit shadow-sm gap-1">
-         <button onClick={() => setViewMode('list')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'list' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>Linha do Tempo</button>
+         <button onClick={() => setViewMode('list')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'list' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>Timeline</button>
          <button onClick={() => setViewMode('intelligence')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'intelligence' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>Estatísticas</button>
-         <button onClick={() => setViewMode('raw')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'raw' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>Dados Brutos (DB)</button>
+         <button onClick={() => setViewMode('raw')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${viewMode === 'raw' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>Dados Brutos</button>
       </div>
 
-      {/* ABA: DADOS BRUTOS (PARA CONFERÊNCIA FIEL AO BANCO) */}
+      {/* ABA: DADOS BRUTOS (PARA CONFERÊNCIA TÉCNICA) */}
       {viewMode === 'raw' && (
         <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden animate-in fade-in">
-           <div className="mb-4 border-b border-slate-100 pb-3 flex justify-between items-center">
-              <h4 className="text-xs font-black text-slate-800 uppercase tracking-tighter">Exploração de Dados Brutos (Fiel à Planilha)</h4>
-              <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">TABELA: AuditoriaConferenciaMat</span>
+           <div className="mb-4 border-b border-slate-100 pb-3">
+              <h4 className="text-xs font-black text-slate-800 uppercase tracking-tighter">Estrutura de Dados do Banco</h4>
            </div>
            <div className="overflow-x-auto custom-scrollbar">
              <table className="w-full text-left font-mono">
@@ -176,7 +176,7 @@ const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh })
                  {safeLogs.length === 0 ? (
                    <tr>
                      <td colSpan={6} className="p-16 text-center text-slate-300 font-bold uppercase tracking-[0.2em]">
-                        {isSyncing ? 'Buscando registros remotos...' : "Base vazia ou desconectada. Clique em 'Sincronizar Logs'."}
+                        {isSyncing ? 'Sincronizando registros...' : "Nenhum dado na memória. Clique em 'Atualizar Histórico'."}
                      </td>
                    </tr>
                  ) : safeLogs.map((log, index) => (
@@ -195,7 +195,7 @@ const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh })
         </div>
       )}
 
-      {/* ABA: LINHA DO TEMPO (TRATADA) */}
+      {/* ABA: TIMELINE (PROCESSADA) */}
       {viewMode === 'list' && (
         <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden animate-in fade-in">
           
@@ -295,7 +295,8 @@ const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh })
                     <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={intelligenceData.barData} layout="vertical">
                             <XAxis type="number" hide />
-                            <YAxis dataKey="name" type="category" width={70} tick={{fontSize: 9, fontWeight: "bold"}} />
+                            {/* Aumentado width para 120 para comportar graduações completas (SD PM FULANO) */}
+                            <YAxis dataKey="name" type="category" width={120} tick={{fontSize: 9, fontWeight: "bold"}} />
                             <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ borderRadius: '1rem', border: 'none', fontSize: '10px', fontWeight: 'bold' }} />
                             <Bar dataKey="count" fill="#3b82f6" radius={[0, 10, 10, 0]} barSize={15} />
                         </BarChart>
