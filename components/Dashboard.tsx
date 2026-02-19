@@ -19,12 +19,15 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
   const [widgetOrder, setWidgetOrder] = useState<string[]>(['stats-turno', 'stats-prontidao', 'produtividade', 'pendencias']);
   const [draggedWidget, setDraggedWidget] = useState<string | null>(null);
 
-  // Estados de Filtro de Escopo
+  // Estados de Filtro de Escopo - Mantidos internamente para respeitar o nível de acesso do usuário logado
   const [filterGb, setFilterGb] = useState<string>('');
   const [filterSgb, setFilterSgb] = useState<string>('');
   const [filterPosto, setFilterPosto] = useState<string>('');
 
-  // Inicializa filtros baseados no escopo do usuário
+  /**
+   * REGRA DE NEGÓCIO: Inicializa os filtros baseados no escopo do usuário.
+   * Mesmo com a remoção da interface de filtros, o sistema deve saber qual o escopo do usuário para filtrar os dados do dashboard.
+   */
   useEffect(() => {
     if (currentUser.scopeLevel === 'GB') setFilterGb(currentUser.scopeId || '');
     if (currentUser.scopeLevel === 'SGB') {
@@ -43,10 +46,8 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
 
   const currentProntidao = getProntidaoInfo(new Date());
 
-  const isPrivileged = currentUser.role === UserRole.SUPER || currentUser.role === UserRole.ADMIN;
-
   /**
-   * Lógica de Filtragem de Viaturas por Escopo Selecionado
+   * REGRA DE FILTRAGEM: Organiza as viaturas que o usuário tem permissão para visualizar.
    */
   const filteredViaturas = useMemo(() => {
     return viaturas.filter(v => {
@@ -62,7 +63,7 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
   }, [viaturas, postos, subs, filterGb, filterSgb, filterPosto]);
 
   /**
-   * Lógica de Filtragem de Checks por Escopo Selecionado
+   * REGRA DE FILTRAGEM: Filtra os checklists realizados baseados nas viaturas visíveis.
    */
   const filteredChecks = useMemo(() => {
     const vtrIds = new Set(filteredViaturas.map(v => v.id));
@@ -155,6 +156,9 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
     setDraggedWidget(null);
   };
 
+  /**
+   * REGRA DE INTERFACE: Define o rótulo do cabeçalho baseado no escopo fixo do usuário.
+   */
   const headerLabel = useMemo(() => {
     if (filterPosto) return postos.find(p => p.id === filterPosto)?.name.toUpperCase() || 'UNIDADE';
     if (filterSgb) return subs.find(s => s.id === filterSgb)?.name.toUpperCase() || 'SUBGRUPAMENTO';
@@ -285,53 +289,10 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
   return (
     <div className="space-y-6 animate-in fade-in duration-700 pb-20">
       
-      {/* FILTROS DE ESCOPO PARA USUÁRIOS PRIVILEGIADOS */}
-      {isPrivileged && (
-        <div className="bg-white p-4 rounded-[1.5rem] shadow-sm border border-slate-200 flex flex-wrap items-center gap-4 transition-all hover:shadow-md">
-            <div className="flex items-center gap-2 px-3 border-r border-slate-100">
-                <span className="text-lg">🔍</span>
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Filtrar Visão</span>
-            </div>
-            
-            <select 
-              value={filterGb} 
-              onChange={e => { setFilterGb(e.target.value); setFilterSgb(''); setFilterPosto(''); }}
-              className="bg-slate-50 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-tight outline-none focus:ring-2 focus:ring-red-100 transition-all border border-slate-100"
-            >
-              <option value="">TODOS OS GB</option>
-              {gbs.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
-
-            <select 
-              value={filterSgb} 
-              onChange={e => { setFilterSgb(e.target.value); setFilterPosto(''); }}
-              disabled={!filterGb}
-              className="bg-slate-50 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-tight outline-none focus:ring-2 focus:ring-red-100 transition-all border border-slate-100 disabled:opacity-30"
-            >
-              <option value="">TODOS OS SGB</option>
-              {subs.filter(s => s.gbId === filterGb).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-
-            <select 
-              value={filterPosto} 
-              onChange={e => setFilterPosto(e.target.value)}
-              disabled={!filterSgb}
-              className="bg-slate-50 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-tight outline-none focus:ring-2 focus:ring-red-100 transition-all border border-slate-100 disabled:opacity-30"
-            >
-              <option value="">TODAS AS UNIDADES</option>
-              {postos.filter(p => p.subId === filterSgb).map(p => <option key={p.id} value={p.id}>{p.classification} {p.name}</option>)}
-            </select>
-
-            {(filterGb || filterSgb || filterPosto) && (
-                <button 
-                  onClick={() => { setFilterGb(''); setFilterSgb(''); setFilterPosto(''); }}
-                  className="ml-auto text-[9px] font-black text-red-600 uppercase tracking-widest hover:underline"
-                >
-                  Limpar Filtros
-                </button>
-            )}
-        </div>
-      )}
+      {/** 
+       * REGRA: Interface de filtros removida conforme solicitação do usuário.
+       * O dashboard agora apresenta os dados fixos baseados no escopo definido no cadastro do usuário.
+       */}
 
       {/* HEADER DENSE */}
       <div 

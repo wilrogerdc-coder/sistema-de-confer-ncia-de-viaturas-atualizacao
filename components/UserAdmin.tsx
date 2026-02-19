@@ -79,7 +79,7 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
   };
 
   const resetForm = () => {
-    setFormData({ name: '', username: '', role: UserRole.USER, scopeLevel: 'GLOBAL', scopeId: '', customPermissions: [] });
+    setFormData({ name: '', username: '', role: UserRole.USER, password: '', scopeLevel: 'GLOBAL', scopeId: '', customPermissions: [] });
     setIsAdding(false);
     setEditingId(null);
   };
@@ -143,6 +143,13 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
               <label className="text-[10px] font-black uppercase text-slate-400">Usuário (Login)</label>
               <input type="text" placeholder="USUÁRIO (LOGIN)" value={formData.username} onChange={e => setFormData({ ...formData, username: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white font-bold outline-none focus:border-red-500" />
             </div>
+            
+            {/* REGRA: Definição de Senha Inicial no cadastro/edição */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase text-slate-400">Senha Inicial</label>
+              <input type="password" placeholder="SENHA" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white font-bold outline-none focus:border-red-500" />
+            </div>
+
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase text-slate-400">Perfil de Acesso</label>
               <select value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value as UserRole })} className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white font-bold outline-none focus:border-red-500">

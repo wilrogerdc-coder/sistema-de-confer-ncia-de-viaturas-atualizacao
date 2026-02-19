@@ -58,6 +58,15 @@ const Checklist: React.FC<ChecklistProps> = ({ viaturas, checks, onComplete, onF
 
   const progressPercent = selectedVtr?.items.length ? Math.round((Object.keys(entries).length / selectedVtr.items.length) * 100) : 0;
   
+  // REGRA: Identificação de compartimentos pendentes (gavetas faltando preencher)
+  const pendingCompartments = useMemo(() => {
+    if (!selectedVtr || !groupedItems) return [];
+    // Adicionado cast explícito para evitar erro 'Property some does not exist on type unknown'
+    return (Object.entries(groupedItems) as [string, MaterialItem[]][])
+      .filter(([comp, items]) => items.some(item => !entries[item.id]))
+      .map(([comp]) => comp);
+  }, [groupedItems, entries, selectedVtr]);
+
   const isJustificationRequired = date !== getTodayLocal() || checks.some(c => c.viaturaId === selectedVtrId && getShiftReferenceDate(c.timestamp) === date);
 
   useEffect(() => {
@@ -187,15 +196,31 @@ const Checklist: React.FC<ChecklistProps> = ({ viaturas, checks, onComplete, onF
                 </div>
                 <div className="w-16 h-8 rounded-full shadow-inner border border-slate-200" style={{ backgroundColor: prontidao.hex }}></div>
             </div>
-            <div className="flex items-center gap-6 bg-slate-50 p-4 rounded-[2rem]">
-                <div className="flex-1">
-                    <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">DATA TURNO</label>
-                    <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-transparent font-black text-base outline-none cursor-pointer" />
+            <div className="bg-slate-50 p-4 rounded-[2rem] space-y-4">
+                <div className="flex items-center gap-6">
+                    <div className="flex-1">
+                        <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">DATA TURNO</label>
+                        <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-transparent font-black text-base outline-none cursor-pointer" />
+                    </div>
+                    <div className="flex-1">
+                        <div className="flex justify-between items-center mb-2"><span className="text-[10px] font-black uppercase text-slate-400">PROGRESSO</span><span className="text-[11px] font-black text-blue-600">{progressPercent}%</span></div>
+                        <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden shadow-inner"><div className="h-full bg-blue-600 transition-all duration-700" style={{ width: `${progressPercent}%` }}></div></div>
+                    </div>
                 </div>
-                <div className="flex-1">
-                    <div className="flex justify-between items-center mb-2"><span className="text-[10px] font-black uppercase text-slate-400">PROGRESSO</span><span className="text-[11px] font-black text-blue-600">{progressPercent}%</span></div>
-                    <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden shadow-inner"><div className="h-full bg-blue-600 transition-all duration-700" style={{ width: `${progressPercent}%` }}></div></div>
-                </div>
+
+                {/* REGRA: Exibição de Gavetas Pendentes para rápida identificação */}
+                {pendingCompartments.length > 0 && (
+                    <div className="pt-2 border-t border-slate-200">
+                        <label className="text-[8px] font-black uppercase text-red-500 tracking-widest mb-2 block">Gavetas Pendentes:</label>
+                        <div className="flex flex-wrap gap-2">
+                            {pendingCompartments.map(comp => (
+                                <span key={comp} className="px-3 py-1 bg-red-50 text-red-600 text-[8px] font-black uppercase rounded-lg border border-red-100 animate-pulse">
+                                    {comp}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
 
@@ -203,7 +228,11 @@ const Checklist: React.FC<ChecklistProps> = ({ viaturas, checks, onComplete, onF
             {(Object.entries(groupedItems) as [string, MaterialItem[]][]).map(([comp, items]) => (
                 <div key={comp} className={`bg-white rounded-[2.5rem] border-2 transition-all ${openCompartments[comp] ? 'border-blue-500 shadow-2xl' : 'border-slate-100 shadow-sm'}`}>
                     <button type="button" onClick={() => setOpenCompartments(p => ({...p, [comp]: !p[comp]}))} className={`w-full p-8 flex justify-between items-center transition-all ${openCompartments[comp] ? 'bg-blue-600 text-white rounded-t-[2.3rem]' : 'bg-white rounded-[2.3rem]'}`}>
-                        <span className="font-black text-base uppercase tracking-widest">{comp}</span>
+                        <div className="flex items-center gap-3">
+                            <span className="font-black text-base uppercase tracking-widest">{comp}</span>
+                            {/* REGRA: Indicador visual se a gaveta está pendente */}
+                            {pendingCompartments.includes(comp) && <span className="w-2 h-2 rounded-full bg-red-400 animate-ping"></span>}
+                        </div>
                         <span className="text-3xl transition-transform" style={{ transform: openCompartments[comp] ? 'rotate(90deg)' : 'rotate(0)' }}>▸</span>
                     </button>
                     {openCompartments[comp] && (

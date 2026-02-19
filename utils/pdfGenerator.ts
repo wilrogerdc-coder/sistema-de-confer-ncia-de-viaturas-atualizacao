@@ -1,4 +1,3 @@
-
 import { InventoryCheck, Viatura, CheckEntry, ViaturaStatus, LogEntry, Posto } from '../types';
 import { formatFullDate, getShiftReferenceDate, formatDateShort, getProntidaoInfo, getDaysInMonth } from './calendarUtils';
 import { PRONTIDAO_CYCLE, DEFAULT_HEADER } from '../constants';
@@ -105,6 +104,16 @@ export const generateInventoryPDF = (check: InventoryCheck, viatura: Viatura, is
   doc.text(`COMANDANTE DA VTR: ${safeUpper(check.commanderName)}`, 15, startY + 27);
   doc.text(`STATUS DA VTR: ${safeUpper(check.viaturaStatusAtTime || ViaturaStatus.OPERANDO)}`, 15, startY + 32);
 
+  // REGRA: Exibir justificativa caso tenha sido preenchida (Casos retroativos ou duplicados)
+  let tableStartY = startY + 37;
+  if (check.justification) {
+    doc.setFont('helvetica', 'bold');
+    doc.text("JUSTIFICATIVA:", 15, startY + 37);
+    doc.setFont('helvetica', 'normal');
+    doc.text(safeUpper(check.justification), 40, startY + 37, { maxWidth: 155 });
+    tableStartY += 8;
+  }
+
   const tableData: any[] = [];
   /**
    * SNAPSHOT DE MATERIAIS:
@@ -132,7 +141,7 @@ export const generateInventoryPDF = (check: InventoryCheck, viatura: Viatura, is
 
   // Geração da Tabela Automática
   (doc as any).autoTable({
-    startY: startY + 37,
+    startY: tableStartY,
     head: [['Qt', 'Material / Equipamento', 'Status', 'Observações']],
     body: tableData,
     theme: 'grid',
@@ -179,7 +188,11 @@ export const generateVtrDetailedMonthlyPDF = (viatura: Viatura, checks: Inventor
             const row: any[] = [safeUpper(item.name)];
             for (let d = 1; d <= daysInMonth; d++) {
                 const dateStr = `${monthYear}-${d.toString().padStart(2, '0')}`;
-                const check = checks.find(c => c.viaturaId === viatura.id && getShiftReferenceDate(c.timestamp) === dateStr);
+                
+                // REGRA: Seleciona a ÚLTIMA conferência do dia caso haja duplicidade
+                const dayChecks = checks.filter(c => c.viaturaId === viatura.id && getShiftReferenceDate(c.timestamp) === dateStr);
+                const check = dayChecks.length > 0 ? [...dayChecks].sort((a,b) => b.timestamp.localeCompare(a.timestamp))[0] : null;
+                
                 row.push(check ? (check.entries.find(e => e.itemId === item.id)?.status || '-') : '');
             }
             body.push(row);
@@ -202,7 +215,11 @@ export const generateVtrDetailedMonthlyPDF = (viatura: Viatura, checks: Inventor
             if (data.row.index === body.length - 1 && data.column.index > 0) {
                 const day = data.column.index;
                 const dateStr = `${monthYear}-${day.toString().padStart(2, '0')}`;
-                const check = checks.find(c => c.viaturaId === viatura.id && getShiftReferenceDate(c.timestamp) === dateStr);
+                
+                // REGRA: Busca o responsável da última conferência do dia
+                const dayChecks = checks.filter(c => c.viaturaId === viatura.id && getShiftReferenceDate(c.timestamp) === dateStr);
+                const check = dayChecks.length > 0 ? [...dayChecks].sort((a,b) => b.timestamp.localeCompare(a.timestamp))[0] : null;
+
                 if (check?.responsibleNames?.[0]) {
                     doc.saveGraphicsState();
                     doc.setFontSize(4.5);
@@ -296,7 +313,6 @@ export const generateManualMonthlyPDF = (viatura: Viatura, monthYear: string, po
 
   const grouped = viatura.items.reduce((acc, item) => {
       const comp = item.compartment || 'GERAL';
-      // Fix: Correctly initialize the accumulator for a new compartment
       if (!acc[comp]) acc[comp] = [];
       acc[comp].push(item);
       return acc;
@@ -353,6 +369,7 @@ export const generateSummaryPDF = (checks: InventoryCheck[], viaturas: Viatura[]
 
 /**
  * RELATÓRIO 5: RESUMO DE NOVIDADES (CN)
+ * REGRA: Adicionada coluna 'Conferente' conforme solicitação.
  */
 export const generateNewsReportPDF = (checks: InventoryCheck[], viaturas: Viatura[], monthYear: string, isPreview: boolean = false, filterVtrId?: string) => {
   const JsPDF = getJsPDF();
@@ -378,7 +395,8 @@ export const generateNewsReportPDF = (checks: InventoryCheck[], viaturas: Viatur
           formatDateShort(getShiftReferenceDate(check.timestamp)),
           vtr?.prefix || '?',
           item?.name || 'Item Desconhecido',
-          entry.observation || 'Sem descrição'
+          entry.observation || 'Sem descrição',
+          safeUpper(check.responsibleNames.join(' / '))
         ]);
       }
     });
@@ -386,7 +404,7 @@ export const generateNewsReportPDF = (checks: InventoryCheck[], viaturas: Viatur
 
   (doc as any).autoTable({
     startY: 30,
-    head: [['Data', 'Vtr', 'Material', 'Observação']],
+    head: [['Data', 'Vtr', 'Material', 'Observação', 'Conferente']],
     body: novelties,
     theme: 'grid',
     headStyles: { fillColor: [180, 0, 0] },

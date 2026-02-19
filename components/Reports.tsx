@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { InventoryCheck, Viatura, User, UserRole, ViaturaStatus, Posto } from '../types';
 import { 
@@ -111,7 +110,11 @@ const Reports: React.FC<ReportsProps> = ({ checks, viaturas, currentUser, postos
                     </td>
                     {dayArray.map(d => {
                       const dStr = `${month}-${d.toString().padStart(2, '0')}`;
-                      const check = checks.find(c => c.viaturaId === v.id && getShiftReferenceDate(c.timestamp) === dStr);
+                      
+                      // REGRA: Seleciona a ÚLTIMA conferência realizada no dia caso haja duplicidade
+                      const dayChecks = checks.filter(c => c.viaturaId === v.id && getShiftReferenceDate(c.timestamp) === dStr);
+                      const check = dayChecks.length > 0 ? [...dayChecks].sort((a,b) => b.timestamp.localeCompare(a.timestamp))[0] : null;
+                      
                       const shift = check ? getProntidaoInfo(new Date(check.timestamp)) : null;
                       const hasCN = check?.entries.some(e => e.status === 'CN');
                       
