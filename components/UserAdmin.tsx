@@ -16,7 +16,6 @@ interface UserAdminProps {
 /**
  * COMPONENTE: UserAdmin
  * Gerencia o cadastro, o escopo de atuação e as PERMISSÕES ADICIONAIS dos usuários.
- * Implementa renomeação para 'Usuários' conforme diretriz sênior.
  */
 const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveUser, onDeleteUser, currentUser }) => {
   const [isAdding, setIsAdding] = useState(false);
@@ -28,9 +27,11 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
   const [filterSgb, setFilterSgb] = useState<string>('');
   const [filterPosto, setFilterPosto] = useState<string>('');
   
+  // REGRA: Inclusão do estado mustChangePassword no formulário
   const [formData, setFormData] = useState<Partial<User>>({
     name: '', username: '', role: UserRole.USER, password: '', 
-    scopeLevel: 'GLOBAL', scopeId: '', customPermissions: []
+    scopeLevel: 'GLOBAL', scopeId: '', customPermissions: [],
+    mustChangePassword: true // Padrão true para novos usuários conforme solicitado
   });
 
   const filteredUsers = useMemo(() => {
@@ -59,6 +60,8 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
 
   const handleCreateOrUpdate = () => {
     if (!formData.name || !formData.username) return alert("Preencha os campos obrigatórios.");
+    
+    // REGRA: Persistência do campo mustChangePassword
     onSaveUser({
       id: editingId || Math.random().toString(36).substr(2, 9),
       name: formData.name!,
@@ -67,7 +70,8 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
       password: formData.password || '123456',
       scopeLevel: formData.scopeLevel || 'GLOBAL',
       scopeId: formData.scopeId || '',
-      customPermissions: formData.customPermissions || []
+      customPermissions: formData.customPermissions || [],
+      mustChangePassword: formData.mustChangePassword // Salva a exigência de troca de senha
     } as User);
     resetForm();
   };
@@ -79,12 +83,15 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
   };
 
   const resetForm = () => {
-    setFormData({ name: '', username: '', role: UserRole.USER, password: '', scopeLevel: 'GLOBAL', scopeId: '', customPermissions: [] });
+    setFormData({ 
+      name: '', username: '', role: UserRole.USER, password: '', 
+      scopeLevel: 'GLOBAL', scopeId: '', customPermissions: [],
+      mustChangePassword: true // Reseta para o padrão de novos usuários
+    });
     setIsAdding(false);
     setEditingId(null);
   };
 
-  // REGRAS DE PERMISSÃO: Toggle granular para permissões adicionais.
   const handleTogglePermission = (p: PermissionKey) => {
     const current = formData.customPermissions || [];
     if (current.includes(p)) {
@@ -144,7 +151,6 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
               <input type="text" placeholder="USUÁRIO (LOGIN)" value={formData.username} onChange={e => setFormData({ ...formData, username: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white font-bold outline-none focus:border-red-500" />
             </div>
             
-            {/* REGRA: Definição de Senha Inicial no cadastro/edição */}
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase text-slate-400">Senha Inicial</label>
               <input type="password" placeholder="SENHA" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white font-bold outline-none focus:border-red-500" />
@@ -182,7 +188,20 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
             )}
           </div>
 
-          {/* REGRAS DE EDIÇÃO: Permissões Adicionais para o Usuário */}
+          {/* REGRA: Inclusão da opção de Solicitar Troca de Senha nas configurações de usuário */}
+          <div className="border-t border-slate-800 pt-6 mb-8 flex flex-col gap-4">
+            <h5 className="text-xs font-black uppercase tracking-widest text-slate-500">Segurança da Conta</h5>
+            <label className="flex items-center gap-3 p-4 bg-slate-800/50 rounded-xl border border-slate-700 cursor-pointer hover:bg-slate-800 transition-colors w-fit">
+              <input 
+                type="checkbox" 
+                checked={formData.mustChangePassword} 
+                onChange={(e) => setFormData({ ...formData, mustChangePassword: e.target.checked })}
+                className="w-5 h-5 accent-red-600"
+              />
+              <span className="text-xs font-bold text-white uppercase">Exigir alteração de senha no primeiro login</span>
+            </label>
+          </div>
+
           <div className="border-t border-slate-800 pt-6 mb-8">
             <h5 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-4">Permissões Adicionais (Customizadas)</h5>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -224,6 +243,8 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
                 <td className="px-6 py-4">
                   <p className="text-xs font-black text-slate-800 uppercase leading-none">{u.name}</p>
                   <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">@{u.username}</p>
+                  {/* REGRA: Indicador visual de senha pendente na lista */}
+                  {u.mustChangePassword && <span className="text-[8px] font-black text-red-500 uppercase">● Troca de Senha Pendente</span>}
                 </td>
                 <td className="px-6 py-4 text-center">
                    <div className="flex flex-col items-center gap-1">

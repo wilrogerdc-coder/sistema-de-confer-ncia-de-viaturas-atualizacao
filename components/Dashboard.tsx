@@ -19,14 +19,15 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
   const [widgetOrder, setWidgetOrder] = useState<string[]>(['stats-turno', 'stats-prontidao', 'produtividade', 'pendencias']);
   const [draggedWidget, setDraggedWidget] = useState<string | null>(null);
 
-  // Estados de Filtro de Escopo - Mantidos internamente para respeitar o nível de acesso do usuário logado
+  // ESTADOS DE FILTRAGEM: filterPosto é o estado mestre para a segmentação de dados no Dashboard
   const [filterGb, setFilterGb] = useState<string>('');
   const [filterSgb, setFilterSgb] = useState<string>('');
   const [filterPosto, setFilterPosto] = useState<string>('');
 
   /**
-   * REGRA DE NEGÓCIO: Inicializa os filtros baseados no escopo do usuário.
-   * Mesmo com a remoção da interface de filtros, o sistema deve saber qual o escopo do usuário para filtrar os dados do dashboard.
+   * REGRA DE NEGÓCIO: Inicialização de Escopo
+   * Define os limites de visualização baseados no nível de acesso (ScopeLevel) do usuário logado.
+   * Isso garante que, mesmo sem filtros ativos, o Dashboard respeite a hierarquia militar.
    */
   useEffect(() => {
     if (currentUser.scopeLevel === 'GB') setFilterGb(currentUser.scopeId || '');
@@ -47,7 +48,15 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
   const currentProntidao = getProntidaoInfo(new Date());
 
   /**
-   * REGRA DE FILTRAGEM: Organiza as viaturas que o usuário tem permissão para visualizar.
+   * REGRA DE PERMISSÃO: Verifica se o usuário tem privilégios para manipular filtros de unidade.
+   * Apenas Administradores e Superusuários podem ver a interface de filtragem.
+   */
+  const canFilterByPosto = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.SUPER;
+
+  /**
+   * REGRA DE FILTRAGEM CORE: Organiza a frota visível.
+   * Filtra as viaturas baseada na vinculação direta do 'postoId' da viatura (aba VIATURAS).
+   * matchPosto: Se houver um filtro de posto ativo, exibe apenas viaturas daquele ID.
    */
   const filteredViaturas = useMemo(() => {
     return viaturas.filter(v => {
@@ -63,7 +72,8 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
   }, [viaturas, postos, subs, filterGb, filterSgb, filterPosto]);
 
   /**
-   * REGRA DE FILTRAGEM: Filtra os checklists realizados baseados nas viaturas visíveis.
+   * REGRA DE INTEGRIDADE: Filtra os checklists baseados apenas nas viaturas que passaram pelo filtro acima.
+   * Isso mantém a consistência entre os gráficos de pizza e as estatísticas operacionais.
    */
   const filteredChecks = useMemo(() => {
     const vtrIds = new Set(filteredViaturas.map(v => v.id));
@@ -157,7 +167,8 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
   };
 
   /**
-   * REGRA DE INTERFACE: Define o rótulo do cabeçalho baseado no escopo fixo do usuário.
+   * REGRA DE INTERFACE: Rótulo Dinâmico do Cabeçalho
+   * Atualiza o título do Dashboard para refletir a unidade sendo visualizada no momento.
    */
   const headerLabel = useMemo(() => {
     if (filterPosto) return postos.find(p => p.id === filterPosto)?.name.toUpperCase() || 'UNIDADE';
@@ -263,11 +274,19 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
                       const vtrChecks = filteredChecks.filter(c => c.viaturaId === v.id).sort((a,b) => b.timestamp.localeCompare(a.timestamp));
                       const lastDate = vtrChecks.length > 0 ? new Date(vtrChecks[0].timestamp) : null;
                       const diffDays = lastDate ? Math.ceil(Math.abs(new Date().getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)) : '∞';
+                      
+                      // REGRA: Identificação do Posto para exibição no card de pendência
+                      const vtrPosto = postos.find(p => p.id === v.postoId);
+
                       return (
                         <div key={v.id} className="p-4 bg-slate-50 hover:bg-white hover:border-red-500 border-2 border-slate-100 rounded-2xl flex justify-between items-center transition-all group shadow-sm hover:shadow-xl cursor-default">
                           <div>
                               <span className="text-[7px] font-black text-slate-300 uppercase tracking-widest block mb-1">Viatura</span>
                               <span className="font-black text-slate-800 text-lg tracking-tighter uppercase group-hover:text-red-600 transition-colors">{v.prefix}</span>
+                              {/* REGRA: Exibição do Posto vinculado à viatura conforme solicitação do usuário */}
+                              <span className="text-[8px] font-bold text-slate-400 uppercase block tracking-tighter leading-none mt-1">
+                                {vtrPosto?.name || 'S/ UNID'}
+                              </span>
                           </div>
                           <div className="text-right">
                               <span className={`text-[7px] font-black px-3 py-1 rounded-lg uppercase shadow-md ${diffDays === '∞' ? 'bg-red-600 text-white shadow-red-200' : 'bg-amber-500 text-white shadow-amber-200'}`}>
@@ -290,9 +309,36 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
     <div className="space-y-6 animate-in fade-in duration-700 pb-20">
       
       {/** 
-       * REGRA: Interface de filtros removida conforme solicitação do usuário.
-       * O dashboard agora apresenta os dados fixos baseados no escopo definido no cadastro do usuário.
+       * REGRA DE INTERFACE: Filtro de Posto disponível apenas para ADMINISTRADOR e SUPERUSUÁRIO.
+       * Permite ao gestor alternar a visão do dashboard entre diferentes unidades de seu escopo.
+       * O filtro reage dinamicamente alterando o estado filterPosto, que é usado na lógica do filteredViaturas.
        */}
+      {canFilterByPosto && (
+        <div className="flex justify-end mb-2">
+          <div className="bg-white p-2 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3">
+             <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Filtrar Unidade:</label>
+             <select 
+               value={filterPosto} 
+               onChange={e => setFilterPosto(e.target.value)} 
+               className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-[10px] font-black uppercase outline-none focus:ring-2 focus:ring-blue-500/20 transition-all min-w-[200px]"
+             >
+               <option value="">TODAS AS UNIDADES</option>
+               {postos
+                 .filter(p => {
+                    // REGRA DE SEGURANÇA: O Administrador só pode ver unidades dentro de seu Grupamento ou Subgrupamento.
+                    if (currentUser.role === UserRole.SUPER) return true;
+                    if (currentUser.scopeLevel === 'GB') return subs.find(s => s.id === p.subId)?.gbId === currentUser.scopeId;
+                    if (currentUser.scopeLevel === 'SGB') return p.subId === currentUser.scopeId;
+                    return true;
+                 })
+                 .map(p => (
+                   <option key={p.id} value={p.id}>{p.classification} {p.name}</option>
+                 ))
+               }
+             </select>
+          </div>
+        </div>
+      )}
 
       {/* HEADER DENSE */}
       <div 

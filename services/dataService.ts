@@ -3,14 +3,17 @@ import { Viatura, InventoryCheck, User, UserRole, GB, Subgrupamento, Posto, LogE
 import { INITIAL_VIATURAS, INITIAL_GBS, INITIAL_SUBS, INITIAL_POSTOS, DEFAULT_ROLE_PERMISSIONS, DEFAULT_THEME } from '../constants';
 
 /**
- * SERVIÇO DE DADOS (dataService.ts) - CAMADA DE PERSISTÊNCIA NÍVEL AVANÇADO
- * Gerencia a comunicação entre o Frontend e o backend em Google Apps Script.
+ * SERVIÇO DE DADOS (dataService.ts) - CAMADA DE PERSISTÊNCIA SÊNIOR
+ * Gerencia a comunicação com os backends Google Apps Script.
  */
 
-// URL do Banco Operacional (Atualizada conforme solicitação do usuário)
 const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbzgw3C6AtmRpataS93D9XXRO4ssm-FnIdamtCCafPrZOQzmJYXNMQrdR14JiLMx4pNA_A/exec';
-// URL do Banco de Auditoria (Mantida conforme solicitação do usuário)
-const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbzrfHg2aBDIVs0SP6EBdyU5mopFHwMMLWK_wPEQg9NCSyH5ddwuRvOZNp7GsEUSmtKp/exec'; 
+
+/** 
+ * REGRA: URL do Banco de Auditoria (Logs de Sistema)
+ * Configurada para a nova implantação conforme colunas: ID, TIMESTAMP, USER_ID, USER_NAME, ACTION, DETAILS.
+ */
+const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbx5tjEc52xxa3TsBiIfqmIRPy8wu_xZrkwo_ROT3uq9yT05Dl23axX7vYMaKk3a7AEDEw/exec'; 
 
 const STORAGE_KEY_CACHE = 'vtr_system_cache_v1.7';
 const STORAGE_KEY_CONFIG = 'vtr_db_config_v1';
@@ -19,9 +22,6 @@ type DataType = 'GB' | 'SUB' | 'POSTO' | 'VIATURA' | 'CHECK' | 'USER' | 'SETUP' 
 
 let pendingFetch: Promise<any> | null = null;
 
-/**
- * Utilitário para conversão de strings JSON vindas da planilha em objetos JavaScript.
- */
 const ensureParsed = (val: any, fallback: any = []) => {
   if (val === null || val === undefined) return fallback;
   if (typeof val === 'string') {
@@ -66,9 +66,6 @@ export const DataService = {
     }
   },
 
-  async setupSpreadsheet(): Promise<void> { await this.sendToCloud('SETUP', 'SAVE', { setup: true }); },
-  async clearDatabase(): Promise<void> { await this.sendToCloud('CLEAR_ALL', 'DELETE', { confirm: true }); localStorage.removeItem(STORAGE_KEY_CACHE); },
-
   async fetchAllData(forceRefresh = false): Promise<any> {
     if (!forceRefresh && pendingFetch) return pendingFetch;
     const { operationalUrl } = getDbConfig();
@@ -87,25 +84,16 @@ export const DataService = {
     return pendingFetch;
   },
 
-  /**
-   * Envia dados para a nuvem. 
-   * TÉCNICO: Utiliza 'text/plain' para evitar Preflight OPTIONS do CORS, 
-   * que não é suportado por Web Apps do Google Apps Script em requisições POST.
-   */
   async sendToCloud(type: DataType, action: 'SAVE' | 'DELETE', payload: any): Promise<void> {
     const { operationalUrl, auditUrl } = getDbConfig();
     const targetUrl = type === 'LOG' ? auditUrl : operationalUrl;
     try {
       const body = JSON.stringify({ type, action, ...payload });
-      // Usar text/plain evita o preflight request (OPTIONS) que causa erro em Apps Script
-      const response = await fetch(targetUrl, { 
+      await fetch(targetUrl, { 
         method: 'POST', 
         headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
         body 
       });
-      
-      // Como Apps Script pode redirecionar, o fetch lida automaticamente se não houver erro de CORS.
-      // Se a conexão falhar aqui, o catch capturará.
       console.log(`[DataService] Requisição de ${type} enviada via ${action}`);
       await new Promise(resolve => setTimeout(resolve, 300));
     } catch (e) { 
@@ -114,38 +102,63 @@ export const DataService = {
     }
   },
 
+  /**
+   * REGRA DE GRAVAÇÃO: Salva log no banco de auditoria.
+   * Mapeia as chaves para os cabeçalhos EXATOS da planilha: ID, TIMESTAMP, USER_ID, USER_NAME, ACTION, DETAILS.
+   */
   async saveLog(log: Omit<LogEntry, 'id' | 'timestamp'>): Promise<void> {
     const { auditUrl } = getDbConfig();
     const entry = {
-        id: Math.random().toString(36).substr(2, 9),
-        timestamp: new Date().toISOString(),
-        userName: log.userName,
-        acao: log.action,
-        detalhes: log.details
+        ID: "L-" + Math.random().toString(36).substr(2, 7).toUpperCase(),
+        TIMESTAMP: new Date().toISOString(),
+        USER_ID: String(log.userId || ''),
+        USER_NAME: String(log.userName || ''),
+        ACTION: String(log.action || ''),
+        DETAILS: String(log.details || '')
     };
     try {
       const body = JSON.stringify({ type: 'LOG', action: 'SAVE', ...entry });
-      await fetch(auditUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body });
-    } catch (e) {}
+      // REGRA: Envio em POST usando mode: no-cors para evitar falhas de preflight e Content-Type text/plain
+      await fetch(auditUrl, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
+        body,
+        mode: 'no-cors'
+      });
+    } catch (e) {
+      console.error("Erro ao persistir log:", e);
+    }
   },
 
+  /**
+   * REGRA DE RECUPERAÇÃO: Captura dados da planilha 'logs'.
+   * Realiza a normalização entre as chaves Maiúsculas (Planilha) e Minúsculas (Aplicação).
+   */
   async getLogs(): Promise<LogEntry[]> {
     const { auditUrl } = getDbConfig();
     try {
-        const response = await fetch(`${auditUrl}?type=LOGS&t=${Date.now()}`, { method: 'GET', cache: 'no-store' });
+        const response = await fetch(`${auditUrl}?type=LOGS&t=${Date.now()}`, { 
+          method: 'GET', 
+          cache: 'no-store'
+        });
+        
         if (response.ok) {
             const data = await response.json();
-            const rawList = Array.isArray(data) ? data : (data.data || []);
+            const rawList = Array.isArray(data) ? data : [];
+            
+            // REGRA: Mapeia colunas da planilha (MAIÚSCULO) para o modelo do App (minúsculo)
             return rawList.map((l: any) => ({
-                id: l.id || l.timestamp,
-                userId: l.userId || '',
-                userName: l.operador || l.userName || 'Sistema',
-                action: l.acao || l.logAction || 'INFO',
-                details: l.detalhes || l.details || '-',
-                timestamp: l.timestamp || l.data || new Date().toISOString()
+                id: String(l.ID || l.id || '-'),
+                userId: String(l.USER_ID || l.userId || ''),
+                userName: String(l.USER_NAME || l.userName || 'Sistema'),
+                action: String(l.ACTION || l.action || 'INFO'),
+                details: String(l.DETAILS || l.details || '-'),
+                timestamp: String(l.TIMESTAMP || l.timestamp || new Date().toISOString())
             }));
         }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Erro ao buscar logs no servidor:", e);
+    }
     return [];
   },
 
@@ -251,5 +264,14 @@ export const DataService = {
       headerConfig: JSON.stringify(settings.headerConfig)
     };
     await this.sendToCloud('SETTINGS', 'SAVE', payload); 
+  },
+
+  /**
+   * REGRA DE RESET: Limpa todos os dados no servidor e no cache local.
+   * Utiliza o tipo 'CLEAR_ALL' definido no protocolo de comunicação com o Google Apps Script.
+   */
+  async clearDatabase() {
+    await this.sendToCloud('CLEAR_ALL', 'DELETE', {});
+    localStorage.removeItem(STORAGE_KEY_CACHE);
   }
 };

@@ -48,6 +48,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
         // Comparação de senha: Respeita espaços mas garante estabilidade de string
         if (dbPass === inputPass) {
+          // REGRA: Verificação rigorosa do flag de troca obrigatória
           const needsChange = user.mustChangePassword === true || 
                              String(user.mustChangePassword).trim().toUpperCase() === 'TRUE';
 
@@ -71,6 +72,9 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     }
   };
 
+  /**
+   * REGRA: Processa a troca de senha obrigatória
+   */
   const handleChangePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword.length < 4) {
@@ -88,7 +92,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       const updatedUser: User = { 
         ...pendingUser, 
         password: newPassword, 
-        mustChangePassword: false 
+        mustChangePassword: false // Reseta o flag após a troca bem-sucedida
       };
       
       await DataService.saveUser(updatedUser);
