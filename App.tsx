@@ -67,7 +67,7 @@ const App: React.FC = () => {
         DataService.getGBS(force),
         DataService.getSubs(force),
         DataService.getPostos(force),
-        DataService.getLogs(),
+        DataService.getLogs(force),
         DataService.getSettings(force)
       ]);
       setViaturas(vtrs || []);

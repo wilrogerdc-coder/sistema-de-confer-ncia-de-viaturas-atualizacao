@@ -21,6 +21,7 @@ const STORAGE_KEY_CONFIG = 'vtr_db_config_v1';
 type DataType = 'GB' | 'SUB' | 'POSTO' | 'VIATURA' | 'CHECK' | 'USER' | 'SETUP' | 'CLEAR_ALL' | 'LOG' | 'SETTINGS';
 
 let pendingFetch: Promise<any> | null = null;
+let isPendingForced = false;
 
 const ensureParsed = (val: any, fallback: any = []) => {
   if (val === null || val === undefined) return fallback;
@@ -67,12 +68,17 @@ export const DataService = {
   },
 
   async fetchAllData(forceRefresh = false): Promise<any> {
-    if (!forceRefresh && pendingFetch) return pendingFetch;
-    if (pendingFetch) return pendingFetch; 
+    // REGRA: Se houver um fetch em andamento, só o reaproveitamos se não estivermos forçando atualização
+    // ou se o fetch atual já for um fetch forçado (evitando múltiplas requisições idênticas simultâneas).
+    if (pendingFetch) {
+      if (!forceRefresh) return pendingFetch;
+      if (isPendingForced) return pendingFetch;
+    }
 
     const { operationalUrl } = getDbConfig();
     if (!operationalUrl) return null;
 
+    isPendingForced = forceRefresh;
     pendingFetch = (async () => {
       let attempts = 0;
       const maxAttempts = forceRefresh ? 3 : 1; 
@@ -80,7 +86,8 @@ export const DataService = {
       while (attempts < maxAttempts) {
         try {
           const separator = operationalUrl.includes('?') ? '&' : '?';
-          const response = await fetch(`${operationalUrl}${separator}t=${Date.now()}`, { 
+          // REGRA: Cache 'no-store' e timestamp dinâmico para garantir que o GAS não retorne cache do servidor
+          const response = await fetch(`${operationalUrl}${separator}t=${Date.now()}&force=${forceRefresh}`, { 
             method: 'GET', 
             cache: 'no-store',
             headers: { 'Accept': 'application/json' }
@@ -90,6 +97,7 @@ export const DataService = {
           const data = await response.json();
           
           if (data && typeof data === 'object') {
+            console.log(`[DataService] Sincronização ${forceRefresh ? 'FORÇADA' : 'NORMAL'} concluída com sucesso.`);
             localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(data));
             return data;
           }
@@ -111,6 +119,7 @@ export const DataService = {
       }
     })().finally(() => {
       pendingFetch = null;
+      isPendingForced = false;
     });
     return pendingFetch;
   },
@@ -166,12 +175,13 @@ export const DataService = {
    * REGRA DE RECUPERAÇÃO: Captura dados da planilha 'logs'.
    * Normaliza os nomes das colunas (MAIÚSCULO) para as propriedades minúsculas do sistema.
    */
-  async getLogs(): Promise<LogEntry[]> {
+  async getLogs(forceRefresh = false): Promise<LogEntry[]> {
     const { auditUrl } = getDbConfig();
     if (!auditUrl) return [];
     
     try {
-        const response = await fetch(`${auditUrl}?type=LOGS&t=${Date.now()}`, { 
+        const separator = auditUrl.includes('?') ? '&' : '?';
+        const response = await fetch(`${auditUrl}${separator}type=LOGS&t=${Date.now()}&force=${forceRefresh}`, { 
           method: 'GET', 
           cache: 'no-store',
           headers: { 'Accept': 'application/json' }
