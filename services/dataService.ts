@@ -78,10 +78,15 @@ export const DataService = {
     const { operationalUrl } = getDbConfig();
     if (!operationalUrl) return null;
 
+    if (forceRefresh) {
+      localStorage.removeItem(STORAGE_KEY_CACHE);
+      console.log('[DataService] Cache local removido para sincronização forçada.');
+    }
+
     isPendingForced = forceRefresh;
     pendingFetch = (async () => {
       let attempts = 0;
-      const maxAttempts = forceRefresh ? 3 : 1; 
+      const maxAttempts = forceRefresh ? 5 : 2; // Aumentado para maior resiliência
       
       while (attempts < maxAttempts) {
         try {
@@ -97,15 +102,19 @@ export const DataService = {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const data = await response.json();
           
-          if (data && typeof data === 'object') {
+          // Validação básica do retorno do GAS
+          if (data && typeof data === 'object' && !data.error) {
             console.log(`[DataService] Sincronização ${forceRefresh ? 'FORÇADA' : 'NORMAL'} concluída com sucesso.`);
             localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(data));
             return data;
+          } else if (data && data.error) {
+            throw new Error(`GAS Error: ${data.error}`);
           }
+          
           throw new Error('Dados inválidos recebidos');
         } catch (e) {
           attempts++;
-          console.warn(`[DataService] Tentativa ${attempts} de fetch falhou:`, e);
+          console.warn(`[DataService] Tentativa ${attempts}/${maxAttempts} de fetch falhou:`, e);
           
           if (attempts >= maxAttempts) {
             try {
@@ -115,7 +124,8 @@ export const DataService = {
               return null;
             }
           }
-          await new Promise(resolve => setTimeout(resolve, 500 * attempts));
+          // Backoff exponencial simples
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
         }
       }
     })().finally(() => {
@@ -123,6 +133,17 @@ export const DataService = {
       isPendingForced = false;
     });
     return pendingFetch;
+  },
+
+  /**
+   * REALIZA UMA SINCRONIZAÇÃO PROFUNDA
+   * Limpa o cache local e força a busca total do banco de dados.
+   */
+  async deepSync(): Promise<void> {
+    console.log('[DataService] Iniciando Deep Sync...');
+    localStorage.removeItem(STORAGE_KEY_CACHE);
+    await this.fetchAllData(true);
+    await this.getLogs(true);
   },
 
   async sendToCloud(type: DataType, action: 'SAVE' | 'DELETE', payload: any): Promise<void> {
@@ -324,7 +345,18 @@ export const DataService = {
     ];
     const rawCloudUsers = data?.users || data?.usuarios || [];
     const cloudUsers = Array.isArray(rawCloudUsers) ? rawCloudUsers : [];
-    const processedUsers = cloudUsers.map(u => ({ ...u, customPermissions: ensureParsed(u.customPermissions, []) }));
+    
+    const processedUsers = cloudUsers
+      .filter(u => u && typeof u === 'object')
+      .map(u => ({ 
+        ...u, 
+        id: String(u.id || u.ID || ''),
+        username: String(u.username || u.USUARIO || u.usuario || ''),
+        name: String(u.name || u.NOME || u.nome || ''),
+        password: String(u.password || u.SENHA || u.senha || ''),
+        role: (u.role || u.ROLE || u.PERFIL || u.perfil || UserRole.USER) as UserRole,
+        customPermissions: ensureParsed(u.customPermissions || u.PERMISSOES || u.permissoes, []) 
+      }));
     const finalUsers = [...processedUsers];
     masterUsers.forEach(m => { 
       const exists = finalUsers.some(u => u && u.username && String(u.username).toLowerCase() === m.username.toLowerCase());

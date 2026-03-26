@@ -41,7 +41,19 @@ const App: React.FC = () => {
   useEffect(() => {
     applyThemeToDocument(DEFAULT_THEME);
     setIsInitializing(true);
-    loadData(true);
+    
+    const init = async () => {
+      // REGRA: Na inicialização do sistema, forçamos um Deep Sync para garantir que 
+      // nenhum dado de cache de sessões anteriores interfira na visualização dos usuários.
+      try {
+        await DataService.deepSync();
+      } catch (e) {
+        console.warn("Falha no Deep Sync inicial, tentando carregamento padrão.");
+      }
+      await loadData(true);
+    };
+    
+    init();
   }, []);
 
   // Recarga de dados ao mudar de aba ou login para garantir sincronia e integridade
@@ -50,6 +62,17 @@ const App: React.FC = () => {
       loadData(false);
     }
   }, [activeTab, user]);
+
+  // REGRA: Sincroniza dados ao voltar para a aba para garantir que o usuário veja os dados mais recentes
+  useEffect(() => {
+    const handleFocus = () => {
+      if (user && !isLoading && !isInitializing) {
+        loadData(false, true); 
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [user, isLoading, isInitializing]);
 
   /**
    * Carrega todos os dados das planilhas/cloud.
@@ -125,6 +148,8 @@ const App: React.FC = () => {
     // REGRA: Gravando username no campo userId para rastreabilidade em gráficos de auditoria
     DataService.saveLog({ userId: loggedUser.username, userName: loggedUser.name, action: 'LOGIN', details: `Acesso via: ${navigator.platform}` });
     setActiveTab('dashboard');
+    // REGRA: Força sincronismo total após o login para garantir dados atualizados
+    loadData(false, true);
   };
   
   const handleLogout = () => {
@@ -216,7 +241,19 @@ const App: React.FC = () => {
     <Layout 
       user={user} 
       onLogout={handleLogout} 
-      onSync={() => loadData(false, true)}
+      onSync={async () => {
+        setIsLoading(true);
+        try {
+          await DataService.deepSync();
+          await loadData(false, false);
+          alert("Sincronização completa realizada com sucesso!");
+        } catch (e) {
+          console.error(e);
+          alert("Falha na sincronização profunda. Verifique sua conexão.");
+        } finally {
+          setIsLoading(false);
+        }
+      }}
       isSyncing={isLoading}
       activeTab={activeTab} 
       setActiveTab={setActiveTab} 
