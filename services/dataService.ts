@@ -17,6 +17,7 @@ const DEFAULT_AUDIT_URL = 'https://script.google.com/macros/s/AKfycbzyjlL_75LKao
 
 const STORAGE_KEY_CACHE = 'vtr_system_cache_v1.7';
 const STORAGE_KEY_CONFIG = 'vtr_db_config_v1';
+const STORAGE_KEY_LAST_SYNC = 'vtr_last_sync_time';
 
 type DataType = 'GB' | 'SUB' | 'POSTO' | 'VIATURA' | 'CHECK' | 'USER' | 'SETUP' | 'CLEAR_ALL' | 'LOG' | 'SETTINGS';
 
@@ -78,22 +79,16 @@ export const DataService = {
     const { operationalUrl } = getDbConfig();
     if (!operationalUrl) return null;
 
-    if (forceRefresh) {
-      localStorage.removeItem(STORAGE_KEY_CACHE);
-      console.log('[DataService] Cache local removido para sincronização forçada.');
-    }
-
     isPendingForced = forceRefresh;
     pendingFetch = (async () => {
       let attempts = 0;
-      const maxAttempts = forceRefresh ? 5 : 2; // Aumentado para maior resiliência
+      const maxAttempts = forceRefresh ? 3 : 1; 
       
       while (attempts < maxAttempts) {
         try {
           const separator = operationalUrl.includes('?') ? '&' : '?';
           // REGRA: Cache 'no-store' e timestamp dinâmico para garantir que o GAS não retorne cache do servidor
-          // Adicionado type=ALL para garantir que o GAS retorne todas as tabelas em uma única chamada
-          const response = await fetch(`${operationalUrl}${separator}type=ALL&t=${Date.now()}&force=${forceRefresh}`, { 
+          const response = await fetch(`${operationalUrl}${separator}t=${Date.now()}&force=${forceRefresh}`, { 
             method: 'GET', 
             cache: 'no-store',
             headers: { 'Accept': 'application/json' }
@@ -102,19 +97,16 @@ export const DataService = {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const data = await response.json();
           
-          // Validação básica do retorno do GAS
-          if (data && typeof data === 'object' && !data.error) {
+          if (data && typeof data === 'object') {
             console.log(`[DataService] Sincronização ${forceRefresh ? 'FORÇADA' : 'NORMAL'} concluída com sucesso.`);
             localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(data));
+            localStorage.setItem(STORAGE_KEY_LAST_SYNC, new Date().toISOString());
             return data;
-          } else if (data && data.error) {
-            throw new Error(`GAS Error: ${data.error}`);
           }
-          
           throw new Error('Dados inválidos recebidos');
         } catch (e) {
           attempts++;
-          console.warn(`[DataService] Tentativa ${attempts}/${maxAttempts} de fetch falhou:`, e);
+          console.warn(`[DataService] Tentativa ${attempts} de fetch falhou:`, e);
           
           if (attempts >= maxAttempts) {
             try {
@@ -124,8 +116,7 @@ export const DataService = {
               return null;
             }
           }
-          // Backoff exponencial simples
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+          await new Promise(resolve => setTimeout(resolve, 500 * attempts));
         }
       }
     })().finally(() => {
@@ -133,17 +124,6 @@ export const DataService = {
       isPendingForced = false;
     });
     return pendingFetch;
-  },
-
-  /**
-   * REALIZA UMA SINCRONIZAÇÃO PROFUNDA
-   * Limpa o cache local e força a busca total do banco de dados.
-   */
-  async deepSync(): Promise<void> {
-    console.log('[DataService] Iniciando Deep Sync...');
-    localStorage.removeItem(STORAGE_KEY_CACHE);
-    await this.fetchAllData(true);
-    await this.getLogs(true);
   },
 
   async sendToCloud(type: DataType, action: 'SAVE' | 'DELETE', payload: any): Promise<void> {
@@ -238,7 +218,7 @@ export const DataService = {
 
   async getGBS(forceRefresh = false): Promise<GB[]> {
     const data = await this.fetchAllData(forceRefresh);
-    const rawList = data?.gbs || data?.gb || data?.grupamentos || data?.GBS || data?.GB || data?.GRUPAMENTOS || data?.grupamento || [];
+    const rawList = data?.gbs || data?.gb || data?.grupamentos || data?.GBS || data?.GB || data?.GRUPAMENTOS || [];
     const list = Array.isArray(rawList) ? rawList : [];
     return list.length > 0 ? list.map((item: any) => ({
       id: String(item.id || item.ID || ''),
@@ -250,7 +230,7 @@ export const DataService = {
 
   async getSubs(forceRefresh = false): Promise<Subgrupamento[]> {
     const data = await this.fetchAllData(forceRefresh);
-    const rawList = data?.subs || data?.sub || data?.subgrupamentos || data?.SUBS || data?.SUB || data?.SUBGRUPAMENTOS || data?.subgrupamento || [];
+    const rawList = data?.subs || data?.sub || data?.subgrupamentos || data?.SUBS || data?.SUB || data?.SUBGRUPAMENTOS || [];
     const list = Array.isArray(rawList) ? rawList : [];
     return list.length > 0 ? list.map((item: any) => ({
       id: String(item.id || item.ID || ''),
@@ -263,7 +243,7 @@ export const DataService = {
 
   async getPostos(forceRefresh = false): Promise<Posto[]> {
     const data = await this.fetchAllData(forceRefresh);
-    const rawList = data?.postos || data?.posto || data?.unidades || data?.POSTOS || data?.POSTO || data?.UNIDADES || data?.unidade || [];
+    const rawList = data?.postos || data?.posto || data?.unidades || data?.POSTOS || data?.POSTO || data?.UNIDADES || [];
     const list = Array.isArray(rawList) ? rawList : [];
     return list.length > 0 ? list.map((item: any) => ({
       id: String(item.id || item.ID || ''),
@@ -288,7 +268,7 @@ export const DataService = {
 
   async getViaturas(forceRefresh = false): Promise<Viatura[]> {
     const data = await this.fetchAllData(forceRefresh);
-    const rawCloudVtrs = data?.viaturas || data?.viatura || data?.bancomateriais || data?.['bancomateriais viatura'] || data?.bancomateriais_viatura || data?.VIATURAS || [];
+    const rawCloudVtrs = data?.viaturas || data?.bancomateriais || data?.['bancomateriais viatura'] || data?.bancomateriais_viatura || data?.VIATURAS || [];
     const cloudVtrs = Array.isArray(rawCloudVtrs) ? rawCloudVtrs : [];
     
     if (cloudVtrs.length === 0) return INITIAL_VIATURAS;
@@ -310,7 +290,7 @@ export const DataService = {
 
   async getChecks(forceRefresh = false): Promise<InventoryCheck[]> {
     const data = await this.fetchAllData(forceRefresh);
-    const rawList = data?.checks || data?.check || data?.conferencias || data?.conferencia || data?.CHECKS || data?.CONFERENCIAS || [];
+    const rawList = data?.checks || data?.conferencias || data?.CHECKS || data?.CONFERENCIAS || [];
     const rawChecks = Array.isArray(rawList) ? rawList : [];
     return rawChecks.map((c: any) => ({ 
         id: String(c.id || c.ID || ''),
@@ -345,18 +325,7 @@ export const DataService = {
     ];
     const rawCloudUsers = data?.users || data?.usuarios || [];
     const cloudUsers = Array.isArray(rawCloudUsers) ? rawCloudUsers : [];
-    
-    const processedUsers = cloudUsers
-      .filter(u => u && typeof u === 'object')
-      .map(u => ({ 
-        ...u, 
-        id: String(u.id || u.ID || ''),
-        username: String(u.username || u.USUARIO || u.usuario || ''),
-        name: String(u.name || u.NOME || u.nome || ''),
-        password: String(u.password || u.SENHA || u.senha || ''),
-        role: (u.role || u.ROLE || u.PERFIL || u.perfil || UserRole.USER) as UserRole,
-        customPermissions: ensureParsed(u.customPermissions || u.PERMISSOES || u.permissoes, []) 
-      }));
+    const processedUsers = cloudUsers.map(u => ({ ...u, customPermissions: ensureParsed(u.customPermissions, []) }));
     const finalUsers = [...processedUsers];
     masterUsers.forEach(m => { 
       const exists = finalUsers.some(u => u && u.username && String(u.username).toLowerCase() === m.username.toLowerCase());
@@ -392,5 +361,20 @@ export const DataService = {
   async clearDatabase() {
     await this.sendToCloud('CLEAR_ALL', 'DELETE', {});
     localStorage.removeItem(STORAGE_KEY_CACHE);
+    localStorage.removeItem(STORAGE_KEY_LAST_SYNC);
+  },
+
+  /**
+   * FUNÇÃO DE SINCRONIZAÇÃO GLOBAL (syncData)
+   * Garante que o cache local seja limpo e os dados sejam buscados diretamente da nuvem.
+   */
+  async syncData(): Promise<any> {
+    console.log("[DataService] Iniciando sincronização global forçada...");
+    localStorage.removeItem(STORAGE_KEY_CACHE);
+    return await this.fetchAllData(true);
+  },
+
+  getLastSyncTime(): string | null {
+    return localStorage.getItem(STORAGE_KEY_LAST_SYNC);
   }
 };

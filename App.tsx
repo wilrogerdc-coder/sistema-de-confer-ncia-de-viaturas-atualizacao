@@ -26,6 +26,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [lastSync, setLastSync] = useState<string | null>(null);
   
   // Estados de Dados Core
   const [viaturas, setViaturas] = useState<Viatura[]>([]);
@@ -41,19 +42,7 @@ const App: React.FC = () => {
   useEffect(() => {
     applyThemeToDocument(DEFAULT_THEME);
     setIsInitializing(true);
-    
-    const init = async () => {
-      // REGRA: Na inicialização do sistema, forçamos um Deep Sync para garantir que 
-      // nenhum dado de cache de sessões anteriores interfira na visualização dos usuários.
-      try {
-        await DataService.deepSync();
-      } catch (e) {
-        console.warn("Falha no Deep Sync inicial, tentando carregamento padrão.");
-      }
-      await loadData(true);
-    };
-    
-    init();
+    loadData(true);
   }, []);
 
   // Recarga de dados ao mudar de aba ou login para garantir sincronia e integridade
@@ -62,17 +51,6 @@ const App: React.FC = () => {
       loadData(false);
     }
   }, [activeTab, user]);
-
-  // REGRA: Sincroniza dados ao voltar para a aba para garantir que o usuário veja os dados mais recentes
-  useEffect(() => {
-    const handleFocus = () => {
-      if (user && !isLoading && !isInitializing) {
-        loadData(false, true); 
-      }
-    };
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, [user, isLoading, isInitializing]);
 
   /**
    * Carrega todos os dados das planilhas/cloud.
@@ -83,6 +61,12 @@ const App: React.FC = () => {
 
     try {
       const force = initialLoad || forceRefresh;
+      
+      // Se for um forceRefresh explícito, usamos a nova função de sincronização global
+      if (forceRefresh) {
+        await DataService.syncData();
+      }
+
       const [vtrs, chks, usrs, g, s, p, l, settings] = await Promise.all([
         DataService.getViaturas(force),
         DataService.getChecks(force),
@@ -102,6 +86,7 @@ const App: React.FC = () => {
       setLogs(l || []);
       setRolePermissions(settings.rolePermissions || DEFAULT_ROLE_PERMISSIONS);
       if (settings.activeTheme) applyThemeToDocument(settings.activeTheme);
+      setLastSync(DataService.getLastSyncTime());
     } catch (e) {
       console.error("Erro ao carregar dados", e);
     } finally {
@@ -148,8 +133,6 @@ const App: React.FC = () => {
     // REGRA: Gravando username no campo userId para rastreabilidade em gráficos de auditoria
     DataService.saveLog({ userId: loggedUser.username, userName: loggedUser.name, action: 'LOGIN', details: `Acesso via: ${navigator.platform}` });
     setActiveTab('dashboard');
-    // REGRA: Força sincronismo total após o login para garantir dados atualizados
-    loadData(false, true);
   };
   
   const handleLogout = () => {
@@ -173,7 +156,7 @@ const App: React.FC = () => {
            await DataService.saveLog({ userId: user.username, userName: user.name, action: 'SAVE_VTR', details: `Configuração da Vtr ${vtr.prefix} atualizada.` });
         }
       }
-      await loadData(false, true);
+      await loadData();
     } catch (e) { alert("Erro ao salvar."); } finally { setIsLoading(false); }
   };
 
@@ -182,7 +165,7 @@ const App: React.FC = () => {
     setIsLoading(true);
     await DataService.deleteViatura(id);
     if (user) await DataService.saveLog({ userId: user.username, userName: user.name, action: 'DEL_VTR', details: `Vtr removida da frota: ${vtr?.prefix}` });
-    await loadData(false, true);
+    await loadData();
   };
 
   const handleCompleteCheck = async (check: InventoryCheck) => {
@@ -192,7 +175,7 @@ const App: React.FC = () => {
         const vtr = viaturas.find(v => v.id === check.viaturaId);
         await DataService.saveLog({ userId: user.username, userName: user.name, action: 'CHECKLIST', details: `Conferência realizada: ${vtr?.prefix} (Status: ${check.viaturaStatusAtTime})` });
     }
-    await loadData(false, true);
+    await loadData();
     setIsFullScreen(false); 
   };
 
@@ -200,7 +183,7 @@ const App: React.FC = () => {
     setIsLoading(true);
     await DataService.saveUser(u);
     if (user) await DataService.saveLog({ userId: user.username, userName: user.name, action: 'SAVE_USER', details: `Cadastro/Edição de usuário: ${u.username}` });
-    await loadData(false, true);
+    await loadData();
   };
 
   const handleDeleteUser = async (id: string) => {
@@ -209,15 +192,15 @@ const App: React.FC = () => {
     setIsLoading(true);
     await DataService.deleteUser(id);
     if (user) await DataService.saveLog({ userId: user.username, userName: user.name, action: 'DEL_USER', details: `Usuário removido: ${u?.username}` });
-    await loadData(false, true);
+    await loadData();
   };
 
-  const handleSaveGB = async (gb: GB) => { await DataService.saveGB(gb); await loadData(false, true); };
-  const handleDeleteGB = async (id: string) => { await DataService.deleteGB(id); await loadData(false, true); };
-  const handleSaveSub = async (sub: Subgrupamento) => { await DataService.saveSub(sub); await loadData(false, true); };
-  const handleDeleteSub = async (id: string) => { await DataService.deleteSub(id); await loadData(false, true); };
-  const handleSavePosto = async (p: Posto) => { await DataService.savePosto(p); await loadData(false, true); };
-  const handleDeletePosto = async (id: string) => { await DataService.deletePosto(id); await loadData(false, true); };
+  const handleSaveGB = async (gb: GB) => { await DataService.saveGB(gb); await loadData(); };
+  const handleDeleteGB = async (id: string) => { await DataService.deleteGB(id); await loadData(); };
+  const handleSaveSub = async (sub: Subgrupamento) => { await DataService.saveSub(sub); await loadData(); };
+  const handleDeleteSub = async (id: string) => { await DataService.deleteSub(id); await loadData(); };
+  const handleSavePosto = async (p: Posto) => { await DataService.savePosto(p); await loadData(); };
+  const handleDeletePosto = async (id: string) => { await DataService.deletePosto(id); await loadData(); };
 
   // Tela de carregamento inicial
   if (isInitializing) {
@@ -241,19 +224,7 @@ const App: React.FC = () => {
     <Layout 
       user={user} 
       onLogout={handleLogout} 
-      onSync={async () => {
-        setIsLoading(true);
-        try {
-          await DataService.deepSync();
-          await loadData(false, false);
-          alert("Sincronização completa realizada com sucesso!");
-        } catch (e) {
-          console.error(e);
-          alert("Falha na sincronização profunda. Verifique sua conexão.");
-        } finally {
-          setIsLoading(false);
-        }
-      }}
+      onSync={() => loadData(false, true)}
       isSyncing={isLoading}
       activeTab={activeTab} 
       setActiveTab={setActiveTab} 
@@ -262,6 +233,7 @@ const App: React.FC = () => {
       gbs={gbs} 
       subs={subs} 
       postos={postos}
+      lastSync={lastSync}
     >
       {isLoading && (
         <div className="fixed top-0 left-0 w-full h-1 z-[100] overflow-hidden bg-slate-100">

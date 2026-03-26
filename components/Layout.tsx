@@ -15,11 +15,13 @@ interface LayoutProps {
   subs?: Subgrupamento[];
   postos?: Posto[];
   isSyncing?: boolean;
+  lastSync?: string | null;
 }
 
 const Layout: React.FC<LayoutProps> = ({ 
   user, onLogout, onSync, activeTab, setActiveTab, children, 
-  isFullScreen = false, permissions, postos = [], isSyncing = false 
+  isFullScreen = false, permissions, postos = [], isSyncing = false,
+  lastSync = null
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -115,6 +117,14 @@ const Layout: React.FC<LayoutProps> = ({
           <span className={isSyncing ? 'animate-spin' : ''}>🔄</span>
           {isSyncing ? 'Sincronizando...' : 'Sincronizar Dados'}
         </button>
+
+        {lastSync && (
+          <div className="text-center animate-in fade-in duration-1000">
+            <p className="text-[7px] text-white/20 uppercase tracking-[0.2em] font-black">
+              Última Sincronia: {new Date(lastSync).toLocaleTimeString('pt-BR')}
+            </p>
+          </div>
+        )}
 
         <button 
           onClick={onLogout} 

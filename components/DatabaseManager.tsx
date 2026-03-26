@@ -154,6 +154,12 @@ const DatabaseManager: React.FC<DatabaseManagerProps> = ({
                         <p className="text-2xl font-black">{Array.isArray(users) ? users.length : 0}</p>
                     </div>
                 </div>
+                <div className="mt-4 flex items-center gap-2">
+                    <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse"></div>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                        Última Sincronia: {DataService.getLastSyncTime() ? new Date(DataService.getLastSyncTime()!).toLocaleString('pt-BR') : 'Nunca'}
+                    </p>
+                </div>
             </div>
         </div>
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col justify-between">
