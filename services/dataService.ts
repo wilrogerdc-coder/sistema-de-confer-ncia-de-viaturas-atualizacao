@@ -87,7 +87,8 @@ export const DataService = {
         try {
           const separator = operationalUrl.includes('?') ? '&' : '?';
           // REGRA: Cache 'no-store' e timestamp dinâmico para garantir que o GAS não retorne cache do servidor
-          const response = await fetch(`${operationalUrl}${separator}t=${Date.now()}&force=${forceRefresh}`, { 
+          // Adicionado type=ALL para garantir que o GAS retorne todas as tabelas em uma única chamada
+          const response = await fetch(`${operationalUrl}${separator}type=ALL&t=${Date.now()}&force=${forceRefresh}`, { 
             method: 'GET', 
             cache: 'no-store',
             headers: { 'Accept': 'application/json' }
@@ -216,7 +217,7 @@ export const DataService = {
 
   async getGBS(forceRefresh = false): Promise<GB[]> {
     const data = await this.fetchAllData(forceRefresh);
-    const rawList = data?.gbs || data?.gb || data?.grupamentos || data?.GBS || data?.GB || data?.GRUPAMENTOS || [];
+    const rawList = data?.gbs || data?.gb || data?.grupamentos || data?.GBS || data?.GB || data?.GRUPAMENTOS || data?.grupamento || [];
     const list = Array.isArray(rawList) ? rawList : [];
     return list.length > 0 ? list.map((item: any) => ({
       id: String(item.id || item.ID || ''),
@@ -228,7 +229,7 @@ export const DataService = {
 
   async getSubs(forceRefresh = false): Promise<Subgrupamento[]> {
     const data = await this.fetchAllData(forceRefresh);
-    const rawList = data?.subs || data?.sub || data?.subgrupamentos || data?.SUBS || data?.SUB || data?.SUBGRUPAMENTOS || [];
+    const rawList = data?.subs || data?.sub || data?.subgrupamentos || data?.SUBS || data?.SUB || data?.SUBGRUPAMENTOS || data?.subgrupamento || [];
     const list = Array.isArray(rawList) ? rawList : [];
     return list.length > 0 ? list.map((item: any) => ({
       id: String(item.id || item.ID || ''),
@@ -241,7 +242,7 @@ export const DataService = {
 
   async getPostos(forceRefresh = false): Promise<Posto[]> {
     const data = await this.fetchAllData(forceRefresh);
-    const rawList = data?.postos || data?.posto || data?.unidades || data?.POSTOS || data?.POSTO || data?.UNIDADES || [];
+    const rawList = data?.postos || data?.posto || data?.unidades || data?.POSTOS || data?.POSTO || data?.UNIDADES || data?.unidade || [];
     const list = Array.isArray(rawList) ? rawList : [];
     return list.length > 0 ? list.map((item: any) => ({
       id: String(item.id || item.ID || ''),
@@ -266,7 +267,7 @@ export const DataService = {
 
   async getViaturas(forceRefresh = false): Promise<Viatura[]> {
     const data = await this.fetchAllData(forceRefresh);
-    const rawCloudVtrs = data?.viaturas || data?.bancomateriais || data?.['bancomateriais viatura'] || data?.bancomateriais_viatura || data?.VIATURAS || [];
+    const rawCloudVtrs = data?.viaturas || data?.viatura || data?.bancomateriais || data?.['bancomateriais viatura'] || data?.bancomateriais_viatura || data?.VIATURAS || [];
     const cloudVtrs = Array.isArray(rawCloudVtrs) ? rawCloudVtrs : [];
     
     if (cloudVtrs.length === 0) return INITIAL_VIATURAS;
@@ -288,7 +289,7 @@ export const DataService = {
 
   async getChecks(forceRefresh = false): Promise<InventoryCheck[]> {
     const data = await this.fetchAllData(forceRefresh);
-    const rawList = data?.checks || data?.conferencias || data?.CHECKS || data?.CONFERENCIAS || [];
+    const rawList = data?.checks || data?.check || data?.conferencias || data?.conferencia || data?.CHECKS || data?.CONFERENCIAS || [];
     const rawChecks = Array.isArray(rawList) ? rawList : [];
     return rawChecks.map((c: any) => ({ 
         id: String(c.id || c.ID || ''),

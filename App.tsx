@@ -148,7 +148,7 @@ const App: React.FC = () => {
            await DataService.saveLog({ userId: user.username, userName: user.name, action: 'SAVE_VTR', details: `Configuração da Vtr ${vtr.prefix} atualizada.` });
         }
       }
-      await loadData();
+      await loadData(false, true);
     } catch (e) { alert("Erro ao salvar."); } finally { setIsLoading(false); }
   };
 
@@ -157,7 +157,7 @@ const App: React.FC = () => {
     setIsLoading(true);
     await DataService.deleteViatura(id);
     if (user) await DataService.saveLog({ userId: user.username, userName: user.name, action: 'DEL_VTR', details: `Vtr removida da frota: ${vtr?.prefix}` });
-    await loadData();
+    await loadData(false, true);
   };
 
   const handleCompleteCheck = async (check: InventoryCheck) => {
@@ -167,7 +167,7 @@ const App: React.FC = () => {
         const vtr = viaturas.find(v => v.id === check.viaturaId);
         await DataService.saveLog({ userId: user.username, userName: user.name, action: 'CHECKLIST', details: `Conferência realizada: ${vtr?.prefix} (Status: ${check.viaturaStatusAtTime})` });
     }
-    await loadData();
+    await loadData(false, true);
     setIsFullScreen(false); 
   };
 
@@ -175,7 +175,7 @@ const App: React.FC = () => {
     setIsLoading(true);
     await DataService.saveUser(u);
     if (user) await DataService.saveLog({ userId: user.username, userName: user.name, action: 'SAVE_USER', details: `Cadastro/Edição de usuário: ${u.username}` });
-    await loadData();
+    await loadData(false, true);
   };
 
   const handleDeleteUser = async (id: string) => {
@@ -184,15 +184,15 @@ const App: React.FC = () => {
     setIsLoading(true);
     await DataService.deleteUser(id);
     if (user) await DataService.saveLog({ userId: user.username, userName: user.name, action: 'DEL_USER', details: `Usuário removido: ${u?.username}` });
-    await loadData();
+    await loadData(false, true);
   };
 
-  const handleSaveGB = async (gb: GB) => { await DataService.saveGB(gb); await loadData(); };
-  const handleDeleteGB = async (id: string) => { await DataService.deleteGB(id); await loadData(); };
-  const handleSaveSub = async (sub: Subgrupamento) => { await DataService.saveSub(sub); await loadData(); };
-  const handleDeleteSub = async (id: string) => { await DataService.deleteSub(id); await loadData(); };
-  const handleSavePosto = async (p: Posto) => { await DataService.savePosto(p); await loadData(); };
-  const handleDeletePosto = async (id: string) => { await DataService.deletePosto(id); await loadData(); };
+  const handleSaveGB = async (gb: GB) => { await DataService.saveGB(gb); await loadData(false, true); };
+  const handleDeleteGB = async (id: string) => { await DataService.deleteGB(id); await loadData(false, true); };
+  const handleSaveSub = async (sub: Subgrupamento) => { await DataService.saveSub(sub); await loadData(false, true); };
+  const handleDeleteSub = async (id: string) => { await DataService.deleteSub(id); await loadData(false, true); };
+  const handleSavePosto = async (p: Posto) => { await DataService.savePosto(p); await loadData(false, true); };
+  const handleDeletePosto = async (id: string) => { await DataService.deletePosto(id); await loadData(false, true); };
 
   // Tela de carregamento inicial
   if (isInitializing) {
