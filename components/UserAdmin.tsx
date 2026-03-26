@@ -36,11 +36,16 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
 
   const filteredUsers = useMemo(() => {
     return users.filter(u => {
-      if (u.username.toLowerCase() === 'cavalieri' || u.username.toLowerCase() === 'admin20gb') return false;
+      if (!u || !u.username) return false;
+      const username = String(u.username).toLowerCase();
+      if (username === 'cavalieri' || username === 'admin20gb') return false;
       
+      const name = String(u.name || '').toLowerCase();
+      const search = searchTerm.toLowerCase();
+
       const matchSearch = searchTerm.trim() === '' || 
-                         u.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                         u.username.toLowerCase().includes(searchTerm.toLowerCase());
+                         name.includes(search) || 
+                         username.includes(search);
       
       const matchRole = filterRole === '' || u.role === filterRole;
 

@@ -12,11 +12,22 @@ export const getProntidaoInfo = (dateInput: Date | string) => {
   
   let checkDate: Date;
   if (typeof dateInput === 'string') {
-    const [y, m, d] = dateInput.split('T')[0].split('-').map(Number);
-    checkDate = new Date(y, m - 1, d, 12, 0, 0); 
+    // Tenta parsing robusto para lidar com formatos ISO e DD/MM/YYYY
+    if (dateInput.includes('T')) {
+      checkDate = new Date(dateInput);
+    } else {
+      const parts = dateInput.split(/[\/\-\s]/);
+      if (parts[0].length === 4) { // YYYY-MM-DD
+        checkDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12, 0, 0);
+      } else { // DD/MM/YYYY
+        checkDate = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]), 12, 0, 0);
+      }
+    }
   } else {
     checkDate = new Date(dateInput);
   }
+
+  if (isNaN(checkDate.getTime())) checkDate = new Date();
 
   const hour = checkDate.getHours();
   const minute = checkDate.getMinutes();
@@ -38,11 +49,21 @@ export const getProntidaoInfo = (dateInput: Date | string) => {
 export const getShiftReferenceDate = (date: Date | string): string => {
   let d: Date;
   if (typeof date === 'string') {
-    const [y, m, d_part] = date.split('T')[0].split('-').map(Number);
-    d = new Date(y, m - 1, d_part, 12, 0, 0);
+    if (date.includes('T')) {
+      d = new Date(date);
+    } else {
+      const parts = date.split(/[\/\-\s]/);
+      if (parts[0].length === 4) { // YYYY-MM-DD
+        d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12, 0, 0);
+      } else { // DD/MM/YYYY
+        d = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]), 12, 0, 0);
+      }
+    }
   } else {
     d = new Date(date);
   }
+
+  if (isNaN(d.getTime())) d = new Date();
 
   const hour = d.getHours();
   const minute = d.getMinutes();

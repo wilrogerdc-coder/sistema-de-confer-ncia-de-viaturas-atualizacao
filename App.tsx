@@ -44,12 +44,12 @@ const App: React.FC = () => {
     loadData(true);
   }, []);
 
-  // Recarga de dados ao mudar de aba para garantir sincronia
+  // Recarga de dados ao mudar de aba ou login para garantir sincronia e integridade
   useEffect(() => {
     if (user && !isInitializing) {
       loadData(false);
     }
-  }, [activeTab]);
+  }, [activeTab, user]);
 
   /**
    * Carrega todos os dados das planilhas/cloud.
@@ -59,15 +59,16 @@ const App: React.FC = () => {
     else setIsLoading(true);
 
     try {
+      const force = initialLoad;
       const [vtrs, chks, usrs, g, s, p, l, settings] = await Promise.all([
-        DataService.getViaturas(),
-        DataService.getChecks(),
-        DataService.getUsers(),
-        DataService.getGBS(),
-        DataService.getSubs(),
-        DataService.getPostos(),
+        DataService.getViaturas(force),
+        DataService.getChecks(force),
+        DataService.getUsers(force),
+        DataService.getGBS(force),
+        DataService.getSubs(force),
+        DataService.getPostos(force),
         DataService.getLogs(),
-        DataService.getSettings()
+        DataService.getSettings(force)
       ]);
       setViaturas(vtrs || []);
       setChecks(chks || []);

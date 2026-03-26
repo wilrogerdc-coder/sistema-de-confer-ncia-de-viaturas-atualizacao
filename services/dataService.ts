@@ -1,5 +1,5 @@
 
-import { Viatura, InventoryCheck, User, UserRole, GB, Subgrupamento, Posto, LogEntry, RolePermissions, SystemSettings } from '../types';
+import { Viatura, InventoryCheck, User, UserRole, GB, Subgrupamento, Posto, LogEntry, RolePermissions, SystemSettings, ViaturaStatus } from '../types';
 import { INITIAL_VIATURAS, INITIAL_GBS, INITIAL_SUBS, INITIAL_POSTOS, DEFAULT_ROLE_PERMISSIONS, DEFAULT_THEME } from '../constants';
 
 /**
@@ -68,19 +68,50 @@ export const DataService = {
 
   async fetchAllData(forceRefresh = false): Promise<any> {
     if (!forceRefresh && pendingFetch) return pendingFetch;
+    if (pendingFetch) return pendingFetch; 
+
     const { operationalUrl } = getDbConfig();
+    if (!operationalUrl) return null;
+
     pendingFetch = (async () => {
-      try {
-        const response = await fetch(`${operationalUrl}?t=${Date.now()}`, { method: 'GET', cache: 'no-store' });
-        if (!response.ok) throw new Error('Falha na rede');
-        const data = await response.json();
-        if (data) localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(data));
-        return data;
-      } catch (e) {
-        const cache = localStorage.getItem(STORAGE_KEY_CACHE);
-        return cache ? JSON.parse(cache) : null;
-      } finally { pendingFetch = null; }
-    })();
+      let attempts = 0;
+      const maxAttempts = forceRefresh ? 3 : 1; 
+      
+      while (attempts < maxAttempts) {
+        try {
+          const separator = operationalUrl.includes('?') ? '&' : '?';
+          const response = await fetch(`${operationalUrl}${separator}t=${Date.now()}`, { 
+            method: 'GET', 
+            cache: 'no-store',
+            headers: { 'Accept': 'application/json' }
+          });
+          
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = await response.json();
+          
+          if (data && typeof data === 'object') {
+            localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(data));
+            return data;
+          }
+          throw new Error('Dados inválidos recebidos');
+        } catch (e) {
+          attempts++;
+          console.warn(`[DataService] Tentativa ${attempts} de fetch falhou:`, e);
+          
+          if (attempts >= maxAttempts) {
+            try {
+              const cache = localStorage.getItem(STORAGE_KEY_CACHE);
+              return cache ? JSON.parse(cache) : null;
+            } catch (parseErr) {
+              return null;
+            }
+          }
+          await new Promise(resolve => setTimeout(resolve, 500 * attempts));
+        }
+      }
+    })().finally(() => {
+      pendingFetch = null;
+    });
     return pendingFetch;
   },
 
@@ -137,18 +168,19 @@ export const DataService = {
    */
   async getLogs(): Promise<LogEntry[]> {
     const { auditUrl } = getDbConfig();
+    if (!auditUrl) return [];
+    
     try {
         const response = await fetch(`${auditUrl}?type=LOGS&t=${Date.now()}`, { 
           method: 'GET', 
-          cache: 'no-store'
+          cache: 'no-store',
+          headers: { 'Accept': 'application/json' }
         });
         
         if (response.ok) {
             const data = await response.json();
-            // REGRA: Verifica se retornou uma lista válida
             const rawList = Array.isArray(data) ? data : [];
             
-            // REGRA: Mapeamento de chaves (Normalização)
             return rawList.map((l: any) => ({
                 id: String(l.ID || l.id || '-'),
                 userId: String(l.USER_ID || l.userId || ''),
@@ -157,31 +189,57 @@ export const DataService = {
                 details: String(l.DETAILS || l.details || '-'),
                 timestamp: String(l.TIMESTAMP || l.timestamp || new Date().toISOString())
             }));
+        } else {
+          console.warn(`[DataService] Servidor de logs retornou status ${response.status}`);
         }
-    } catch (e) {
-      console.error("Erro ao buscar logs no servidor remoto:", e);
+    } catch (e: any) {
+      // REGRA: Silenciamos o erro de rede para evitar poluição no console se for apenas instabilidade
+      const isNetworkError = e.name === 'TypeError' && (e.message === 'Failed to fetch' || e.message === 'NetworkError when attempting to fetch resource.');
+      if (isNetworkError) {
+        console.warn("[DataService] Falha de conexão com o servidor de auditoria. Verifique sua rede ou CORS.");
+      } else {
+        console.error("Erro ao buscar logs no servidor remoto:", e);
+      }
     }
     return [];
   },
 
-  async getGBS(): Promise<GB[]> {
-    const data = await this.fetchAllData();
-    return (data?.gbs && data.gbs.length > 0) ? data.gbs : INITIAL_GBS;
+  async getGBS(forceRefresh = false): Promise<GB[]> {
+    const data = await this.fetchAllData(forceRefresh);
+    const rawList = data?.gbs || data?.gb || data?.grupamentos || data?.GBS || data?.GB || data?.GRUPAMENTOS || [];
+    const list = Array.isArray(rawList) ? rawList : [];
+    return list.length > 0 ? list.map((item: any) => ({
+      id: String(item.id || item.ID || ''),
+      name: String(item.name || item.NAME || item.NOME || '')
+    })) : INITIAL_GBS;
   },
   async saveGB(gb: GB) { await this.sendToCloud('GB', 'SAVE', gb); },
   async deleteGB(id: string) { await this.sendToCloud('GB', 'DELETE', { id }); },
 
-  async getSubs(): Promise<Subgrupamento[]> {
-    const data = await this.fetchAllData();
-    return (data?.subs && data.subs.length > 0) ? data.subs : INITIAL_SUBS;
+  async getSubs(forceRefresh = false): Promise<Subgrupamento[]> {
+    const data = await this.fetchAllData(forceRefresh);
+    const rawList = data?.subs || data?.sub || data?.subgrupamentos || data?.SUBS || data?.SUB || data?.SUBGRUPAMENTOS || [];
+    const list = Array.isArray(rawList) ? rawList : [];
+    return list.length > 0 ? list.map((item: any) => ({
+      id: String(item.id || item.ID || ''),
+      gbId: String(item.gbId || item.GB_ID || item.gb_id || ''),
+      name: String(item.name || item.NAME || item.NOME || '')
+    })) : INITIAL_SUBS;
   },
   async saveSub(sub: Subgrupamento) { await this.sendToCloud('SUB', 'SAVE', sub); },
   async deleteSub(id: string) { await this.sendToCloud('SUB', 'DELETE', { id }); },
 
-  async getPostos(): Promise<Posto[]> {
-    const data = await this.fetchAllData();
-    const rawPostos = data?.postos || [];
-    return rawPostos.length > 0 ? rawPostos : INITIAL_POSTOS;
+  async getPostos(forceRefresh = false): Promise<Posto[]> {
+    const data = await this.fetchAllData(forceRefresh);
+    const rawList = data?.postos || data?.posto || data?.unidades || data?.POSTOS || data?.POSTO || data?.UNIDADES || [];
+    const list = Array.isArray(rawList) ? rawList : [];
+    return list.length > 0 ? list.map((item: any) => ({
+      id: String(item.id || item.ID || ''),
+      subId: String(item.subId || item.SUB_ID || item.sub_id || ''),
+      name: String(item.name || item.NAME || item.NOME || ''),
+      municipio: String(item.municipio || item.MUNICIPIO || ''),
+      classification: String(item.classification || item.CLASSIFICATION || item.classificacao || '')
+    })) : INITIAL_POSTOS;
   },
   
   async savePosto(posto: Posto) { 
@@ -196,11 +254,21 @@ export const DataService = {
   
   async deletePosto(id: string) { await this.sendToCloud('POSTO', 'DELETE', { id }); },
 
-  async getViaturas(): Promise<Viatura[]> {
-    const data = await this.fetchAllData();
-    const cloudVtrs = data?.viaturas || [];
+  async getViaturas(forceRefresh = false): Promise<Viatura[]> {
+    const data = await this.fetchAllData(forceRefresh);
+    const rawCloudVtrs = data?.viaturas || data?.bancomateriais || data?.['bancomateriais viatura'] || data?.bancomateriais_viatura || data?.VIATURAS || [];
+    const cloudVtrs = Array.isArray(rawCloudVtrs) ? rawCloudVtrs : [];
+    
     if (cloudVtrs.length === 0) return INITIAL_VIATURAS;
-    return cloudVtrs.map((v: any) => ({ ...v, items: ensureParsed(v.items, []) }));
+    
+    return cloudVtrs.map((v: any) => ({
+      id: String(v.id || v.ID || Math.random().toString(36).substr(2, 9)),
+      name: String(v.name || v.NOME || v.Nome || ''),
+      prefix: String(v.prefix || v.PREFIXO || v.Prefixo || ''),
+      status: (v.status || v.STATUS || v.Status || ViaturaStatus.OPERANDO) as ViaturaStatus,
+      postoId: String(v.postoId || v.POSTO_ID || v.posto_id || v.PostoID || v.Unidade || ''),
+      items: ensureParsed(v.items || v.ITEMS || v.materiais || v.MATERIAIS || v.Materiais, [])
+    }));
   },
   async saveViatura(viatura: Viatura) { 
     const payload = { ...viatura, items: JSON.stringify(viatura.items) };
@@ -208,15 +276,21 @@ export const DataService = {
   },
   async deleteViatura(id: string) { await this.sendToCloud('VIATURA', 'DELETE', { id }); },
 
-  async getChecks(): Promise<InventoryCheck[]> {
-    const data = await this.fetchAllData();
-    const rawChecks = data?.checks || [];
+  async getChecks(forceRefresh = false): Promise<InventoryCheck[]> {
+    const data = await this.fetchAllData(forceRefresh);
+    const rawList = data?.checks || data?.conferencias || data?.CHECKS || data?.CONFERENCIAS || [];
+    const rawChecks = Array.isArray(rawList) ? rawList : [];
     return rawChecks.map((c: any) => ({ 
-        ...c, 
-        entries: ensureParsed(c.entries, []), 
-        responsibleNames: ensureParsed(c.responsibleNames, []), 
-        headerDetails: ensureParsed(c.headerDetails, null), 
-        snapshot: ensureParsed(c.snapshot, [])
+        id: String(c.id || c.ID || ''),
+        viaturaId: String(c.viaturaId || c.VIATURA_ID || c.viatura_id || ''),
+        date: String(c.date || c.DATE || c.DATA || c.date || ''),
+        shiftColor: String(c.shiftColor || c.SHIFT_COLOR || c.COR_TURNO || c.turno || ''),
+        responsibleNames: ensureParsed(c.responsibleNames || c.RESPONSIBLE_NAMES || c.responsaveis || [], []),
+        commanderName: String(c.commanderName || c.COMMANDER_NAME || c.comandante || ''),
+        entries: ensureParsed(c.entries || c.ENTRIES || c.itens || [], []), 
+        timestamp: String(c.timestamp || c.TIMESTAMP || c.data_hora || ''),
+        headerDetails: ensureParsed(c.headerDetails || c.HEADER_DETAILS || c.cabecalho || null, null), 
+        snapshot: ensureParsed(c.snapshot || c.SNAPSHOT || c.foto_inventario || [], [])
     }));
   },
 
@@ -237,10 +311,14 @@ export const DataService = {
       { id: 'master-1', username: 'admin20gb', name: 'Administrador 20GB', role: UserRole.ADMIN, password: 'admin20gb', scopeLevel: 'GLOBAL' },
       { id: 'master-2', username: 'cavalieri', name: 'Super Usuário Cavalieri', role: UserRole.SUPER, password: 'tricolor', scopeLevel: 'GLOBAL' }
     ];
-    const cloudUsers: any[] = data?.users || [];
+    const rawCloudUsers = data?.users || data?.usuarios || [];
+    const cloudUsers = Array.isArray(rawCloudUsers) ? rawCloudUsers : [];
     const processedUsers = cloudUsers.map(u => ({ ...u, customPermissions: ensureParsed(u.customPermissions, []) }));
     const finalUsers = [...processedUsers];
-    masterUsers.forEach(m => { if (!finalUsers.some(u => u.username.toLowerCase() === m.username.toLowerCase())) finalUsers.push(m); });
+    masterUsers.forEach(m => { 
+      const exists = finalUsers.some(u => u && u.username && String(u.username).toLowerCase() === m.username.toLowerCase());
+      if (!exists) finalUsers.push(m); 
+    });
     return finalUsers;
   },
   async saveUser(user: User) { 
@@ -250,9 +328,9 @@ export const DataService = {
   },
   async deleteUser(id: string) { await this.sendToCloud('USER', 'DELETE', { id }); },
 
-  async getSettings(): Promise<SystemSettings> {
-    const data = await this.fetchAllData();
-    const loadedSettings = data?.settings || {};
+  async getSettings(forceRefresh = false): Promise<SystemSettings> {
+    const data = await this.fetchAllData(forceRefresh);
+    const loadedSettings = data?.settings || data?.config || data?.configuracoes || {};
     return {
       rolePermissions: ensureParsed(loadedSettings.rolePermissions, DEFAULT_ROLE_PERMISSIONS),
       activeTheme: ensureParsed(loadedSettings.activeTheme, DEFAULT_THEME),

@@ -34,9 +34,42 @@ const Reports: React.FC<ReportsProps> = ({ checks, viaturas, currentUser, postos
   }, [viaturas, filterPosto, currentUser]);
 
   const filteredHistory = useMemo(() => {
-    const vtrIds = new Set(visibleViaturas.map(v => v.id));
-    return checks.filter(c => vtrIds.has(c.viaturaId) && (filterVtr ? c.viaturaId === filterVtr : true)).reverse();
-  }, [checks, visibleViaturas, filterVtr]);
+    return checks.filter(c => {
+      // Filtro por Viatura específica (ID exato)
+      if (filterVtr && c.viaturaId !== filterVtr) return false;
+
+      // Se houver filtro de posto (Unidade), verifica a viatura
+      if (filterPosto) {
+        const vtr = viaturas.find(v => v.id === c.viaturaId);
+        if (vtr) {
+          if (String(vtr.postoId) !== String(filterPosto)) return false;
+        } else {
+          // Se a viatura não está na lista atual, tenta filtrar pelo nome do posto no cabeçalho salvo
+          const postoNome = postos.find(p => String(p.id) === String(filterPosto))?.name;
+          if (postoNome && c.headerDetails?.pelotao && !c.headerDetails.pelotao.includes(postoNome)) return false;
+        }
+      }
+
+      // Restrição de escopo para usuários não privilegiados
+      if (currentUser.scopeLevel === 'POSTO' && !isPrivileged) {
+        const userPostoId = String(currentUser.scopeId);
+        const vtr = viaturas.find(v => v.id === c.viaturaId);
+        if (vtr && String(vtr.postoId) !== userPostoId) return false;
+      }
+
+      return true;
+    }).sort((a, b) => {
+      const parseDate = (s: string) => {
+        if (!s) return 0;
+        if (s.includes('T')) return new Date(s).getTime();
+        const parts = s.split(/[\/\-\s]/);
+        if (parts.length < 3) return 0;
+        if (parts[0].length === 4) return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])).getTime();
+        return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0])).getTime();
+      };
+      return parseDate(b.timestamp) - parseDate(a.timestamp);
+    });
+  }, [checks, viaturas, postos, filterVtr, filterPosto, currentUser, isPrivileged]);
 
   const safeReport = (fn: Function, ...args: any[]) => {
     try { fn(...args); } catch (e: any) { alert(`Erro ao processar PDF: ${e.message}`); }
