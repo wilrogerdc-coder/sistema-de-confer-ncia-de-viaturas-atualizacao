@@ -5,6 +5,7 @@ import { APP_NAME } from '../constants';
 interface LayoutProps {
   user: User;
   onLogout: () => void;
+  onSync: () => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
   children: React.ReactNode;
@@ -13,9 +14,13 @@ interface LayoutProps {
   gbs?: GB[];
   subs?: Subgrupamento[];
   postos?: Posto[];
+  isSyncing?: boolean;
 }
 
-const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab, children, isFullScreen = false, permissions, postos = [] }) => {
+const Layout: React.FC<LayoutProps> = ({ 
+  user, onLogout, onSync, activeTab, setActiveTab, children, 
+  isFullScreen = false, permissions, postos = [], isSyncing = false 
+}) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const tabs = useMemo(() => {
@@ -98,6 +103,19 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, activeTab, setActiveTab
           </div>
         </div>
         
+        <button 
+          onClick={onSync} 
+          disabled={isSyncing}
+          className={`w-full py-3.5 rounded-xl text-[10px] font-black uppercase tracking-[0.3em] transition-all duration-500 border active:scale-95 shadow-lg flex items-center justify-center gap-2 ${
+            isSyncing 
+            ? 'bg-white/5 text-white/20 border-white/5 cursor-not-allowed' 
+            : 'bg-white/5 hover:bg-white/10 text-white border-white/10'
+          }`}
+        >
+          <span className={isSyncing ? 'animate-spin' : ''}>🔄</span>
+          {isSyncing ? 'Sincronizando...' : 'Sincronizar Dados'}
+        </button>
+
         <button 
           onClick={onLogout} 
           className="w-full py-3.5 rounded-xl bg-rose-950/20 hover:bg-red-600 text-rose-500 hover:text-white text-[10px] font-black uppercase tracking-[0.3em] transition-all duration-500 border border-rose-900/30 active:scale-95 shadow-lg"

@@ -54,12 +54,12 @@ const App: React.FC = () => {
   /**
    * Carrega todos os dados das planilhas/cloud.
    */
-  const loadData = async (initialLoad = false) => {
+  const loadData = async (initialLoad = false, forceRefresh = false) => {
     if (initialLoad) setIsInitializing(true);
     else setIsLoading(true);
 
     try {
-      const force = initialLoad;
+      const force = initialLoad || forceRefresh;
       const [vtrs, chks, usrs, g, s, p, l, settings] = await Promise.all([
         DataService.getViaturas(force),
         DataService.getChecks(force),
@@ -213,7 +213,19 @@ const App: React.FC = () => {
   if (!user) return <Login onLogin={handleLogin} />;
 
   return (
-    <Layout user={user} onLogout={handleLogout} activeTab={activeTab} setActiveTab={setActiveTab} isFullScreen={isFullScreen} permissions={currentUserPermissions} gbs={gbs} subs={subs} postos={postos}>
+    <Layout 
+      user={user} 
+      onLogout={handleLogout} 
+      onSync={() => loadData(false, true)}
+      isSyncing={isLoading}
+      activeTab={activeTab} 
+      setActiveTab={setActiveTab} 
+      isFullScreen={isFullScreen} 
+      permissions={currentUserPermissions} 
+      gbs={gbs} 
+      subs={subs} 
+      postos={postos}
+    >
       {isLoading && (
         <div className="fixed top-0 left-0 w-full h-1 z-[100] overflow-hidden bg-slate-100">
           <div className="h-full animate-[loading_2s_ease-in-out_infinite]" style={{ backgroundColor: 'var(--theme-primary)' }}></div>
