@@ -1,6 +1,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { LogEntry, User, UserRole } from '../types';
+import { APP_VERSION } from '../constants';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, Legend
@@ -306,6 +307,9 @@ const LogManager: React.FC<LogManagerProps> = ({ logs, currentUser, onRefresh })
           </div>
         </div>
       )}
+      <div className="mt-10 pt-6 border-t border-slate-100 text-center">
+         <p className="text-[8px] font-black text-slate-300 uppercase tracking-[0.4em]">Desenvolvido por CAVALIERI 2026 {APP_VERSION}</p>
+      </div>
     </div>
   );
 };

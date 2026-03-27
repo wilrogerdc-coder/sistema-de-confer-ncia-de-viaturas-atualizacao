@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Viatura, MaterialItem, Posto, ViaturaStatus, User, UserRole, InventoryCheck } from '../types';
 import { getShiftReferenceDate } from '../utils/calendarUtils';
+import { APP_VERSION } from '../constants';
 
 interface InventoryManagerProps {
   viaturas: Viatura[];
@@ -454,7 +455,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, p
           </div>
 
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-6 border-t border-white/10">
-            <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.3em]">Desenvolvido por CAVALIERI 2026</p>
+            <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.3em]">Desenvolvido por CAVALIERI 2026 {APP_VERSION}</p>
             <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
               <button onClick={handleUpdateVtr} disabled={isSaving} className="w-full sm:w-auto bg-emerald-600 px-10 py-4 rounded-xl font-black uppercase text-xs shadow-lg transition-all hover:brightness-110">{isSaving ? 'Gravando...' : 'Finalizar Configuração'}</button>
               <button onClick={() => { setEditingVtr(null); setCompartmentOrder([]); }} className="w-full sm:w-auto bg-slate-700 px-10 py-4 rounded-xl font-black uppercase text-xs">Descartar</button>
@@ -504,7 +505,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, p
           })}
         </div>
       )}
-      <p className="text-[8px] font-black text-slate-300 uppercase tracking-[0.4em] text-center mt-10">Desenvolvido por CAVALIERI 2026</p>
+      <p className="text-[8px] font-black text-slate-300 uppercase tracking-[0.4em] text-center mt-10">Desenvolvido por CAVALIERI 2026 {APP_VERSION}</p>
     </div>
   );
 };

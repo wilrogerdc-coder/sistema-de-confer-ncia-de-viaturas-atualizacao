@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { User, PermissionKey, GB, Subgrupamento, Posto } from '../types';
-import { APP_NAME } from '../constants';
+import { APP_NAME, APP_VERSION } from '../constants';
 
 interface LayoutProps {
   user: User;
@@ -134,8 +134,8 @@ const Layout: React.FC<LayoutProps> = ({
         </button>
 
         <div className="pt-2 text-center">
-            {/* REGRA: Créditos de desenvolvimento no rodapé do menu lateral */}
-            <p className="text-[8px] font-black uppercase tracking-[0.4em] text-white/20">Cavalieri - 2026</p>
+            {/* REGRA: Créditos de desenvolvimento no rodapé do menu lateral com versão */}
+            <p className="text-[8px] font-black uppercase tracking-[0.4em] text-white/20">Cavalieri - 2026 {APP_VERSION}</p>
         </div>
       </div>
     </>

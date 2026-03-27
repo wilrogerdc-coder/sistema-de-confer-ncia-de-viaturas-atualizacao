@@ -91,6 +91,7 @@ export const THEME_PRESETS: Theme[] = [
 
 export const DEFAULT_THEME = THEME_PRESETS[0];
 export const APP_NAME = "Conferência de Materiais";
+export const APP_VERSION = "v1.3.6";
 
 export const DEFAULT_HEADER = {
   secretaria: "SECRETARIA DA SEGURANÇA PÚBLICA",
