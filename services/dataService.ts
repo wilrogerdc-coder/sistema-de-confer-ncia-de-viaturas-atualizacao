@@ -139,6 +139,15 @@ export const DataService = {
       }));
     }
 
+    if (Array.isArray(normalized.checks)) {
+      normalized.checks = normalized.checks.map((c: any) => ({
+        ...c,
+        id: String(c.id || c.ID || ''),
+        viaturaId: String(c.viaturaId || c.VIATURA_ID || c.viatura_id || ''),
+        date: String(c.date || c.DATE || c.DATA || '')
+      }));
+    }
+
     return normalized;
   },
 
@@ -156,18 +165,29 @@ export const DataService = {
       return null;
     }
 
-    // Se não for forçado, tenta o cache primeiro
+    // Se não for forçado, tenta o cache primeiro com validação de TTL (1 minuto)
     if (!forceRefresh) {
       const cache = localStorage.getItem(STORAGE_KEY_CACHE);
-      if (cache) {
+      const lastSync = localStorage.getItem(STORAGE_KEY_LAST_SYNC);
+      
+      if (cache && lastSync) {
         try {
-          const parsed = JSON.parse(cache);
-          if (parsed && typeof parsed === 'object' && (parsed.viaturas || parsed.users)) {
-            console.log("[DataService] Usando cache local válido.");
-            return this.normalizeData(parsed);
+          const lastSyncDate = new Date(lastSync);
+          const now = new Date();
+          const diffSeconds = (now.getTime() - lastSyncDate.getTime()) / 1000;
+          
+          // REGRA: Se o cache tiver menos de 60 segundos, consideramos "fresco"
+          if (diffSeconds < 60) {
+            const parsed = JSON.parse(cache);
+            if (parsed && typeof parsed === 'object' && (parsed.viaturas || parsed.users)) {
+              console.log(`[DataService] Usando cache local (idade: ${Math.round(diffSeconds)}s).`);
+              return this.normalizeData(parsed);
+            }
+          } else {
+            console.log(`[DataService] Cache expirado há ${Math.round(diffSeconds - 60)}s. Sincronizando...`);
           }
         } catch (e) {
-          console.warn("[DataService] Cache corrompido, ignorando...");
+          console.warn("[DataService] Falha ao validar cache, ignorando...");
         }
       }
     }
