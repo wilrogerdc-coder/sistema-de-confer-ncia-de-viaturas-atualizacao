@@ -201,61 +201,61 @@ export const DataService = {
       const maxAttempts = forceRefresh ? 3 : 1; 
       
       while (attempts < maxAttempts) {
-        try {
-          const separator = operationalUrl.includes('?') ? '&' : '?';
-          // REGRA: Cache 'no-store' e timestamp dinâmico para garantir que o GAS não retorne cache do servidor
-          const response = await this.fetchWithTimeout(`${operationalUrl}${separator}t=${Date.now()}&force=${forceRefresh}`, { 
-            method: 'GET', 
-            cache: 'no-store',
-            headers: { 'Accept': 'application/json' }
-          }, 20000); // Timeout de 20s para dados operacionais
-          
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const rawData = await response.json();
-          
-          // Validação do objeto retornado
-          if (rawData && typeof rawData === 'object' && (rawData.viaturas || rawData.users)) {
-            const data = this.normalizeData(rawData);
-            
-            // REGRA: Só atualiza o cache e retorna se este for o fetch mais recente
-            if (fetchId === currentFetchId) {
-              console.log(`[DataService] Sincronização ${forceRefresh ? 'FORÇADA' : 'NORMAL'} (ID: ${fetchId}) concluída com sucesso.`);
-              localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(data));
-              localStorage.setItem(STORAGE_KEY_LAST_SYNC, new Date().toISOString());
-              return data;
-            } else {
-              console.log(`[DataService] Fetch ${fetchId} ignorado pois o ID ${currentFetchId} já está em andamento.`);
-              return null;
-            }
+    try {
+      const separator = operationalUrl.includes('?') ? '&' : '?';
+      // REGRA: Cache 'no-store' e timestamp dinâmico para garantir que o GAS não retorne cache do servidor
+      // Aumentado timeout para 30s para suportar bases de dados maiores
+      const response = await this.fetchWithTimeout(`${operationalUrl}${separator}t=${Date.now()}&force=${forceRefresh}`, { 
+        method: 'GET', 
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json' }
+      }, 30000); 
+      
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const rawData = await response.json();
+      
+      // Validação do objeto retornado
+      if (rawData && typeof rawData === 'object' && (rawData.viaturas || rawData.users)) {
+        const data = this.normalizeData(rawData);
+        
+        // REGRA: Só atualiza o cache e retorna se este for o fetch mais recente
+        if (fetchId === currentFetchId) {
+          console.log(`[DataService] Sincronização ${forceRefresh ? 'FORÇADA' : 'NORMAL'} (ID: ${fetchId}) concluída com sucesso.`);
+          try {
+            localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(data));
+            localStorage.setItem(STORAGE_KEY_LAST_SYNC, new Date().toISOString());
+          } catch (storageErr) {
+            console.warn("[DataService] Falha ao salvar cache (Storage Full):", storageErr);
+            // Mesmo sem cache, o sistema deve continuar com os dados em memória
           }
-          throw new Error('Dados inválidos ou incompletos recebidos da nuvem');
-        } catch (e) {
-          attempts++;
-          if (fetchId !== currentFetchId) return null; // Aborta se houver novo fetch
-          
-          console.warn(`[DataService] Tentativa ${attempts} de fetch ${fetchId} falhou:`, e);
-          
-          if (attempts >= maxAttempts) {
-            // REGRA: Se estivermos forçando atualização (ex: Login), não usamos o cache como fallback
-            // para evitar autenticação com senhas obsoletas.
-            if (forceRefresh) {
-              console.error(`[DataService] Falha crítica na sincronização forçada ${fetchId}.`);
-              return null;
-            }
-
-            try {
-              const cache = localStorage.getItem(STORAGE_KEY_CACHE);
-              if (cache) {
-                console.log("[DataService] Falha na rede. Usando cache de emergência.");
-                return this.normalizeData(JSON.parse(cache));
-              }
-              return null;
-            } catch (parseErr) {
-              return null;
-            }
-          }
-          await new Promise(resolve => setTimeout(resolve, 500 * attempts));
+          return data;
+        } else {
+          console.log(`[DataService] Fetch ${fetchId} ignorado pois o ID ${currentFetchId} já está em andamento.`);
+          return null;
         }
+      }
+      throw new Error('Dados inválidos ou incompletos recebidos da nuvem');
+    } catch (e) {
+      attempts++;
+      if (fetchId !== currentFetchId) return null; // Aborta se houver novo fetch
+      
+      console.warn(`[DataService] Tentativa ${attempts} de fetch ${fetchId} falhou:`, e);
+      
+      if (attempts >= maxAttempts) {
+        // REGRA: Se estivermos forçando atualização (ex: Login), tentamos o cache como ÚLTIMO recurso
+        // se a rede falhar completamente, mas avisamos o sistema.
+        try {
+          const cache = localStorage.getItem(STORAGE_KEY_CACHE);
+          if (cache) {
+            console.log("[DataService] Falha na rede após retentativas. Usando cache disponível.");
+            return this.normalizeData(JSON.parse(cache));
+          }
+        } catch (parseErr) {}
+        return null;
+      }
+      // Backoff exponencial simples
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+    }
       }
     })().finally(() => {
       if (fetchId === currentFetchId) {

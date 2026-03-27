@@ -1,6 +1,5 @@
 import express from 'express';
 import type { Request, Response } from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { Pool } from 'pg';
 import cors from 'cors';
@@ -17,7 +16,7 @@ app.use(express.json({ limit: '50mb' }));
 
 // Database connection
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: process.env.DATABASE_URL || 'postgres://localhost:5432/postgres',
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
 
@@ -211,6 +210,7 @@ app.post('/api/data', async (req: Request, res: Response) => {
 // Vite middleware for development
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -224,11 +224,9 @@ async function startServer() {
     });
   }
 
-  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
-  }
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 }
 
 startServer();

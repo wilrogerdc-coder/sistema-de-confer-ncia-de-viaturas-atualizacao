@@ -25,8 +25,10 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
+  const [periodFilter, setPeriodFilter] = useState<'30days' | 'all'>('30days');
   
   // Estados de Dados Core
   const [viaturas, setViaturas] = useState<Viatura[]>([]);
@@ -59,15 +61,16 @@ const App: React.FC = () => {
    * Carrega todos os dados das planilhas/cloud.
    */
   const loadData = async (initialLoad = false, forceRefresh = false) => {
-    if (initialLoad) setIsInitializing(true);
-    else setIsLoading(true);
+    if (initialLoad) {
+      setIsInitializing(true);
+      setLoadError(null);
+    } else {
+      setIsLoading(true);
+    }
 
     try {
-      // REGRA: Na carga inicial (initialLoad), NÃO forçamos o fetch se houver cache.
-      // O forceRefresh é usado apenas quando o usuário clica no botão de sincronizar.
       const force = forceRefresh;
       
-      // Se for um forceRefresh explícito, usamos a nova função de sincronização global
       if (forceRefresh) {
         await DataService.syncData();
       }
@@ -82,6 +85,15 @@ const App: React.FC = () => {
         DataService.getLogs(force),
         DataService.getSettings(force)
       ]);
+
+      // REGRA: Se os dados essenciais (viaturas ou usuários) vierem nulos, houve falha na sincronização
+      if (!vtrs || !usrs) {
+        if (initialLoad) {
+          setLoadError('Não foi possível estabelecer conexão com o banco de dados. Verifique sua internet e tente novamente.');
+          return;
+        }
+      }
+
       setViaturas(vtrs || []);
       setChecks(chks || []);
       setUsers(usrs || []);
@@ -92,13 +104,41 @@ const App: React.FC = () => {
       setRolePermissions(settings.rolePermissions || DEFAULT_ROLE_PERMISSIONS);
       if (settings.activeTheme) applyThemeToDocument(settings.activeTheme);
       setLastSync(DataService.getLastSyncTime());
+      setLoadError(null);
     } catch (e) {
       console.error("Erro ao carregar dados", e);
+      if (initialLoad) {
+        setLoadError('Erro crítico ao carregar informações. Por favor, recarregue a página.');
+      }
     } finally {
-      if (initialLoad) setTimeout(() => setIsInitializing(false), 800);
-      else setIsLoading(false);
+      if (initialLoad) {
+        // Pequeno delay para garantir que o estado do React se estabilize
+        setTimeout(() => setIsInitializing(false), 1000);
+      } else {
+        setIsLoading(false);
+      }
     }
   };
+
+  /**
+   * REGRA DE PERFORMANCE: Filtra os checklists baseados no período selecionado.
+   * Por padrão, exibe apenas os últimos 30 dias para garantir fluidez no carregamento inicial.
+   */
+  const filteredChecksByPeriod = useMemo(() => {
+    if (periodFilter === 'all') return checks;
+    
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    return checks.filter(c => {
+      try {
+        const checkDate = new Date(c.timestamp);
+        return checkDate >= thirtyDaysAgo;
+      } catch (e) {
+        return true; // Se a data for inválida, mantém no histórico
+      }
+    });
+  }, [checks, periodFilter]);
 
   /**
    * Resolve as permissões reais do usuário (Role + Custom).
@@ -226,13 +266,28 @@ const App: React.FC = () => {
   // Tela de carregamento inicial
   if (isInitializing) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center space-y-8 animate-in fade-in duration-700" style={{ backgroundColor: 'var(--theme-secondary)' }}>
+      <div className="min-h-screen flex flex-col items-center justify-center space-y-8 animate-in fade-in duration-700 p-6" style={{ backgroundColor: 'var(--theme-secondary)' }}>
         <div className="relative">
           <div className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl shadow-[0_0_40px_rgba(255,255,255,0.2)] animate-pulse" style={{ backgroundColor: 'var(--theme-primary)', color: 'white' }}>🚒</div>
         </div>
-        <div className="text-center space-y-2">
-          <h1 className="text-2xl font-black tracking-tighter text-white">{APP_NAME}</h1>
+        <div className="text-center space-y-4 max-w-md w-full">
+          <h1 className="text-2xl font-black tracking-tighter text-white uppercase">{APP_NAME}</h1>
           <p className="text-xs font-bold text-white/50 uppercase tracking-[0.2em] animate-pulse">Sincronizando Cloud Master...</p>
+          
+          {loadError && (
+            <div className="bg-red-500/20 border border-red-500/50 p-6 rounded-2xl text-center animate-in zoom-in">
+              <p className="text-red-200 text-sm font-bold mb-4">{loadError}</p>
+              <button 
+                onClick={() => loadData(true, true)}
+                className="px-8 py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-black uppercase text-xs transition-all shadow-lg"
+              >
+                Tentar Novamente
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="mt-12 text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">
+          CAVALIERI - 2026 v1.3.7
         </div>
       </div>
     );
@@ -270,13 +325,23 @@ const App: React.FC = () => {
       )}
       
       {/* Roteamento de Abas */}
-      {activeTab === 'dashboard' && currentUserPermissions.includes('view_dashboard') && <Dashboard viaturas={visibleViaturas} checks={checks} postos={postos} subs={subs} gbs={gbs} logs={logs} currentUser={user} />}
+      {activeTab === 'dashboard' && currentUserPermissions.includes('view_dashboard') && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center px-4">
+            <div className="flex items-center gap-2 bg-white/50 backdrop-blur-sm p-1 rounded-xl border border-slate-200 shadow-sm">
+              <button onClick={() => setPeriodFilter('30days')} className={`px-4 py-1.5 rounded-lg text-[8px] font-black uppercase transition-all ${periodFilter === '30days' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:bg-slate-100'}`}>Últimos 30 Dias</button>
+              <button onClick={() => setPeriodFilter('all')} className={`px-4 py-1.5 rounded-lg text-[8px] font-black uppercase transition-all ${periodFilter === 'all' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:bg-slate-100'}`}>Todo o Período</button>
+            </div>
+          </div>
+          <Dashboard viaturas={visibleViaturas} checks={filteredChecksByPeriod} postos={postos} subs={subs} gbs={gbs} logs={logs} currentUser={user} />
+        </div>
+      )}
       
-      {activeTab === 'checklist' && currentUserPermissions.includes('perform_checklist') && <Checklist viaturas={visibleViaturas} checks={checks} onComplete={handleCompleteCheck} onFullScreenChange={setIsFullScreen} postos={postos} subs={subs} gbs={gbs} />}
+      {activeTab === 'checklist' && currentUserPermissions.includes('perform_checklist') && <Checklist viaturas={visibleViaturas} checks={filteredChecksByPeriod} onComplete={handleCompleteCheck} onFullScreenChange={setIsFullScreen} postos={postos} subs={subs} gbs={gbs} />}
       
-      {activeTab === 'inventory' && currentUserPermissions.includes('manage_fleet') && <InventoryManager viaturas={visibleViaturas} checks={checks} postos={postos} onSaveViatura={handleSaveViatura} onDeleteViatura={handleDeleteViatura} currentUser={user} />}
+      {activeTab === 'inventory' && currentUserPermissions.includes('manage_fleet') && <InventoryManager viaturas={visibleViaturas} checks={filteredChecksByPeriod} postos={postos} onSaveViatura={handleSaveViatura} onDeleteViatura={handleDeleteViatura} currentUser={user} />}
       
-      {activeTab === 'reports' && currentUserPermissions.includes('view_reports') && <Reports checks={checks} viaturas={viaturas} currentUser={user} postos={postos} />}
+      {activeTab === 'reports' && currentUserPermissions.includes('view_reports') && <Reports checks={filteredChecksByPeriod} viaturas={viaturas} currentUser={user} postos={postos} />}
       
       {activeTab === 'users' && currentUserPermissions.includes('manage_users') && <UserAdmin users={users} gbs={gbs} subs={subs} postos={postos} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} currentUser={user} />}
       
