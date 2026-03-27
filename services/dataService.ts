@@ -23,6 +23,7 @@ type DataType = 'GB' | 'SUB' | 'POSTO' | 'VIATURA' | 'CHECK' | 'USER' | 'SETUP' 
 
 let pendingFetch: Promise<any> | null = null;
 let isPendingForced = false;
+let currentFetchId = 0;
 
 const ensureParsed = (val: any, fallback: any = []) => {
   if (val === null || val === undefined) return fallback;
@@ -193,6 +194,8 @@ export const DataService = {
     }
 
     isPendingForced = forceRefresh;
+    const fetchId = ++currentFetchId;
+    
     pendingFetch = (async () => {
       let attempts = 0;
       const maxAttempts = forceRefresh ? 3 : 1; 
@@ -213,17 +216,33 @@ export const DataService = {
           // Validação do objeto retornado
           if (rawData && typeof rawData === 'object' && (rawData.viaturas || rawData.users)) {
             const data = this.normalizeData(rawData);
-            console.log(`[DataService] Sincronização ${forceRefresh ? 'FORÇADA' : 'NORMAL'} concluída com sucesso.`);
-            localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(data));
-            localStorage.setItem(STORAGE_KEY_LAST_SYNC, new Date().toISOString());
-            return data;
+            
+            // REGRA: Só atualiza o cache e retorna se este for o fetch mais recente
+            if (fetchId === currentFetchId) {
+              console.log(`[DataService] Sincronização ${forceRefresh ? 'FORÇADA' : 'NORMAL'} (ID: ${fetchId}) concluída com sucesso.`);
+              localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(data));
+              localStorage.setItem(STORAGE_KEY_LAST_SYNC, new Date().toISOString());
+              return data;
+            } else {
+              console.log(`[DataService] Fetch ${fetchId} ignorado pois o ID ${currentFetchId} já está em andamento.`);
+              return null;
+            }
           }
           throw new Error('Dados inválidos ou incompletos recebidos da nuvem');
         } catch (e) {
           attempts++;
-          console.warn(`[DataService] Tentativa ${attempts} de fetch falhou:`, e);
+          if (fetchId !== currentFetchId) return null; // Aborta se houver novo fetch
+          
+          console.warn(`[DataService] Tentativa ${attempts} de fetch ${fetchId} falhou:`, e);
           
           if (attempts >= maxAttempts) {
+            // REGRA: Se estivermos forçando atualização (ex: Login), não usamos o cache como fallback
+            // para evitar autenticação com senhas obsoletas.
+            if (forceRefresh) {
+              console.error(`[DataService] Falha crítica na sincronização forçada ${fetchId}.`);
+              return null;
+            }
+
             try {
               const cache = localStorage.getItem(STORAGE_KEY_CACHE);
               if (cache) {
@@ -239,8 +258,10 @@ export const DataService = {
         }
       }
     })().finally(() => {
-      pendingFetch = null;
-      isPendingForced = false;
+      if (fetchId === currentFetchId) {
+        pendingFetch = null;
+        isPendingForced = false;
+      }
     });
     return pendingFetch;
   },
@@ -484,14 +505,22 @@ export const DataService = {
   },
 
   /**
+   * LIMPA O CACHE LOCAL
+   * Remove os dados persistidos para forçar uma carga limpa da nuvem.
+   */
+  clearCache() {
+    localStorage.removeItem(STORAGE_KEY_CACHE);
+    localStorage.removeItem(STORAGE_KEY_LAST_SYNC);
+    console.log("[DataService] Cache local removido com sucesso.");
+  },
+
+  /**
    * FUNÇÃO DE SINCRONIZAÇÃO GLOBAL (syncData)
    * Garante que o cache local seja limpo e os dados sejam buscados diretamente da nuvem.
    */
   async syncData(): Promise<any> {
     console.log("[DataService] Iniciando sincronização global forçada...");
-    // REMOVIDO: localStorage.removeItem(STORAGE_KEY_CACHE); 
-    // Motivo: Se o fetch falhar, perdemos o acesso aos dados. 
-    // fetchAllData(true) já ignora o cache para a busca.
+    this.clearCache();
     return await this.fetchAllData(true);
   },
 

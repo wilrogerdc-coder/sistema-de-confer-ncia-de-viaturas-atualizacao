@@ -27,6 +27,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   /**
    * PROCESSA A TENTATIVA DE LOGIN
    * Realiza normalização do usuário (trim + lowercase) para garantir fidelidade ao banco de dados.
+   * REGRA: Força limpeza de cache e busca fresca na nuvem para evitar dados obsoletos de outros dispositivos.
    */
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,8 +35,17 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setLoading(true);
 
     try {
-      // Força recarga de usuários para capturar inclusões manuais ou mestre
+      // REGRA: Limpeza de cache explicitamente solicitada pelo usuário para login
+      DataService.clearCache();
+      
+      // REGRA: Sincronização global forçada no login para garantir senhas e permissões atualizadas
+      console.log("[Login] Solicitando sincronização forçada com a nuvem...");
       const users = await DataService.getUsers(true);
+      
+      if (!users || users.length === 0) {
+        throw new Error('Não foi possível carregar a lista de usuários da nuvem.');
+      }
+
       const inputUserNormalized = username.trim().toLowerCase();
       
       const user = users.find(u => 
