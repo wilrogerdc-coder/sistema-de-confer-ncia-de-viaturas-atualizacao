@@ -42,9 +42,10 @@ const App: React.FC = () => {
   useEffect(() => {
     applyThemeToDocument(DEFAULT_THEME);
     setIsInitializing(true);
-    // REGRA: Na carga inicial, tentamos o cache primeiro para evitar telas em branco
-    // O usuário pode sincronizar manualmente depois se necessário.
-    loadData(true, false);
+    // REGRA: Na carga inicial, FORÇAMOS a sincronização total para garantir que o login 
+    // tenha acesso aos dados mais recentes (senhas, permissões, etc) da nuvem.
+    // Isso atende à solicitação de carregar dados completos "antes de digitar a senha".
+    loadData(true, true);
   }, []);
 
   // Recarga de dados ao mudar de aba ou login para garantir sincronia e integridade
@@ -238,7 +239,14 @@ const App: React.FC = () => {
   }
 
   // Se não houver usuário logado, exibe tela de Login
-  if (!user) return <Login onLogin={handleLogin} />;
+  if (!user) return (
+    <Login 
+      onLogin={handleLogin} 
+      users={users} 
+      onSync={() => loadData(false, true)} 
+      isSyncing={isLoading} 
+    />
+  );
 
   return (
     <Layout 

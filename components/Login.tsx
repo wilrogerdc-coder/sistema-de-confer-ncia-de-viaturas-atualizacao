@@ -6,13 +6,16 @@ import { APP_NAME } from '../constants';
 
 interface LoginProps {
   onLogin: (user: User) => void;
+  users: User[];
+  onSync: () => Promise<void>;
+  isSyncing: boolean;
 }
 
 /**
  * COMPONENTE DE LOGIN
  * Gerencia o acesso ao sistema com normalização de strings para evitar falhas de autenticação.
  */
-const Login: React.FC<LoginProps> = ({ onLogin }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, users, onSync, isSyncing }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -32,20 +35,17 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // REGRA: Utilizamos os usuários já carregados pelo App.tsx (Sincronização Cloud Master)
+    // Isso garante que os dados estejam prontos "antes de digitar a senha".
+    if (!users || users.length === 0) {
+      setError('O sistema ainda está sincronizando com a nuvem. Por favor, aguarde alguns segundos.');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      // REGRA: Limpeza de cache explicitamente solicitada pelo usuário para login
-      DataService.clearCache();
-      
-      // REGRA: Sincronização global forçada no login para garantir senhas e permissões atualizadas
-      console.log("[Login] Solicitando sincronização forçada com a nuvem...");
-      const users = await DataService.getUsers(true);
-      
-      if (!users || users.length === 0) {
-        throw new Error('Não foi possível carregar a lista de usuários da nuvem.');
-      }
-
       const inputUserNormalized = username.trim().toLowerCase();
       
       const user = users.find(u => 
@@ -197,9 +197,20 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               </div>
             )}
 
-            <button type="submit" disabled={loading} className="w-full py-4 text-white rounded-xl font-black uppercase text-sm shadow-xl hover:brightness-110 disabled:opacity-50 transition-all mt-4" style={{ backgroundColor: 'var(--theme-primary)' }}>
-              {loading ? 'Autenticando...' : 'Acessar Terminal'}
+            <button type="submit" disabled={loading || isSyncing} className="w-full py-4 text-white rounded-xl font-black uppercase text-sm shadow-xl hover:brightness-110 disabled:opacity-50 transition-all mt-4" style={{ backgroundColor: 'var(--theme-primary)' }}>
+              {loading ? 'Autenticando...' : isSyncing ? 'Sincronizando...' : 'Acessar Terminal'}
             </button>
+
+            <div className="pt-4 text-center">
+              <button 
+                type="button" 
+                onClick={onSync} 
+                disabled={isSyncing || loading}
+                className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors disabled:opacity-30"
+              >
+                {isSyncing ? '🔄 Sincronizando...' : '🔃 Sincronizar Dados Agora'}
+              </button>
+            </div>
           </form>
         </div>
       </div>
