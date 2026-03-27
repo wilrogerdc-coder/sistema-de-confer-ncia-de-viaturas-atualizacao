@@ -42,7 +42,9 @@ const App: React.FC = () => {
   useEffect(() => {
     applyThemeToDocument(DEFAULT_THEME);
     setIsInitializing(true);
-    loadData(true);
+    // REGRA: Na carga inicial, tentamos o cache primeiro para evitar telas em branco
+    // O usuário pode sincronizar manualmente depois se necessário.
+    loadData(true, false);
   }, []);
 
   // Recarga de dados ao mudar de aba ou login para garantir sincronia e integridade
@@ -60,7 +62,9 @@ const App: React.FC = () => {
     else setIsLoading(true);
 
     try {
-      const force = initialLoad || forceRefresh;
+      // REGRA: Na carga inicial (initialLoad), NÃO forçamos o fetch se houver cache.
+      // O forceRefresh é usado apenas quando o usuário clica no botão de sincronizar.
+      const force = forceRefresh;
       
       // Se for um forceRefresh explícito, usamos a nova função de sincronização global
       if (forceRefresh) {
@@ -111,20 +115,36 @@ const App: React.FC = () => {
    */
   const visibleViaturas = useMemo(() => {
     if (!user) return [];
-    if (!user.scopeLevel || user.scopeLevel === 'GLOBAL') return viaturas;
-    return viaturas.filter(v => {
+    
+    // REGRA: Usuários SUPER sempre veem tudo, independente do escopo configurado.
+    if (user.role === UserRole.SUPER) return viaturas;
+
+    // Normalização defensiva do nível de escopo
+    const level = String(user.scopeLevel || 'GLOBAL').toUpperCase();
+    
+    if (level === 'GLOBAL') return viaturas;
+    
+    const filtered = viaturas.filter(v => {
       const vtrPostoId = v.postoId;
       if (!vtrPostoId) return false;
-      const posto = postos.find(p => p.id === vtrPostoId);
+      
+      const posto = postos.find(p => String(p.id) === String(vtrPostoId));
       if (!posto) return false;
-      if (user.scopeLevel === 'POSTO') return posto.id === user.scopeId;
-      if (user.scopeLevel === 'SGB') return posto.subId === user.scopeId;
-      if (user.scopeLevel === 'GB') {
-        const sub = subs.find(s => s.id === posto.subId);
-        return sub?.gbId === user.scopeId;
+      
+      if (level === 'POSTO') return user.scopeId ? String(posto.id) === String(user.scopeId) : false;
+      if (level === 'SGB') return user.scopeId ? String(posto.subId) === String(user.scopeId) : false;
+      if (level === 'GB') {
+        const sub = subs.find(s => String(s.id) === String(posto.subId));
+        return sub && user.scopeId ? String(sub.gbId) === String(user.scopeId) : false;
       }
       return false;
     });
+
+    if (viaturas.length > 0 && filtered.length === 0) {
+      console.warn(`[App] Usuário ${user.username} (Nível: ${user.role}, Escopo: ${level}/${user.scopeId || 'NÃO DEFINIDO'}) não possui viaturas visíveis. Verifique se o ID do escopo está correto no cadastro.`);
+    }
+
+    return filtered;
   }, [viaturas, user, postos, subs]);
 
   // Handlers de Login e Logout
@@ -246,7 +266,7 @@ const App: React.FC = () => {
       
       {activeTab === 'checklist' && currentUserPermissions.includes('perform_checklist') && <Checklist viaturas={visibleViaturas} checks={checks} onComplete={handleCompleteCheck} onFullScreenChange={setIsFullScreen} postos={postos} subs={subs} gbs={gbs} />}
       
-      {activeTab === 'inventory' && currentUserPermissions.includes('manage_fleet') && <InventoryManager viaturas={visibleViaturas} postos={postos} onSaveViatura={handleSaveViatura} onDeleteViatura={handleDeleteViatura} currentUser={user} />}
+      {activeTab === 'inventory' && currentUserPermissions.includes('manage_fleet') && <InventoryManager viaturas={visibleViaturas} checks={checks} postos={postos} onSaveViatura={handleSaveViatura} onDeleteViatura={handleDeleteViatura} currentUser={user} />}
       
       {activeTab === 'reports' && currentUserPermissions.includes('view_reports') && <Reports checks={checks} viaturas={viaturas} currentUser={user} postos={postos} />}
       

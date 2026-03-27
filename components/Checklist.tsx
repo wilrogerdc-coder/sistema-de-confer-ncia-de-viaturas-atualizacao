@@ -149,12 +149,25 @@ const Checklist: React.FC<ChecklistProps> = ({ viaturas, checks, onComplete, onF
               >
                 <div>
                   <div className="flex justify-between items-start mb-6">
-                    <span className={`w-fit text-[10px] font-black px-4 py-2 rounded-2xl uppercase tracking-widest shadow-md ${
-                      isOP ? 'bg-emerald-500 text-white shadow-emerald-200' : v.status === ViaturaStatus.RESERVA ? 'bg-amber-500 text-white shadow-amber-200' : 'bg-red-950 text-white shadow-red-200'
-                    }`}>
-                      {v.status}
-                    </span>
-                    {checkedToday && <div className="bg-emerald-500 text-white p-2 rounded-full shadow-lg animate-in zoom-in">✓</div>}
+                    <div className="flex flex-col gap-2">
+                      <span className={`w-fit text-[10px] font-black px-4 py-2 rounded-2xl uppercase tracking-widest shadow-md ${
+                        isOP ? 'bg-emerald-500 text-white shadow-emerald-200' : v.status === ViaturaStatus.RESERVA ? 'bg-amber-500 text-white shadow-amber-200' : 'bg-red-950 text-white shadow-red-200'
+                      }`}>
+                        {v.status}
+                      </span>
+                      {checkedToday ? (
+                        <span className="w-fit text-[9px] font-black px-3 py-1.5 rounded-xl uppercase tracking-widest bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          CONFERIDA
+                        </span>
+                      ) : (
+                        <span className="w-fit text-[9px] font-black px-3 py-1.5 rounded-xl uppercase tracking-widest bg-red-100 text-red-700 border border-red-200 flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+                          PENDENTE
+                        </span>
+                      )}
+                    </div>
+                    {checkedToday && <div className="bg-emerald-500 text-white p-2 rounded-full shadow-lg animate-in zoom-in flex items-center justify-center w-10 h-10 text-xl">✓</div>}
                   </div>
                   <h3 className={`text-5xl font-black tracking-tighter leading-none ${checkedToday ? 'text-emerald-800' : 'text-slate-900'}`}>{v.prefix}</h3>
                   <p className="text-slate-500 font-bold uppercase text-xs tracking-widest mt-3">{v.name}</p>

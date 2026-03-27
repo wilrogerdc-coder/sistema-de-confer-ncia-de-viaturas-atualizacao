@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import { Viatura, InventoryCheck, ProntidaoColor, Posto, User, ViaturaStatus, UserRole, Subgrupamento, GB, LogEntry } from '../types';
-import { ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend, LineChart, Line } from 'recharts';
+import { ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend, LineChart, Line, BarChart, Bar } from 'recharts';
 import { getProntidaoInfo, formatFullDate, getShiftReferenceDate } from '../utils/calendarUtils';
 
 interface DashboardProps {
@@ -16,7 +16,7 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, gbs, currentUser }) => {
   const [chartScope, setChartScope] = useState<'weekly' | 'monthly' | 'yearly'>('weekly');
-  const [widgetOrder, setWidgetOrder] = useState<string[]>(['stats-turno', 'stats-prontidao', 'produtividade', 'pendencias']);
+  const [widgetOrder, setWidgetOrder] = useState<string[]>(['stats-turno', 'stats-prontidao', 'produtividade', 'pendencias', 'stats-unidades']);
   const [draggedWidget, setDraggedWidget] = useState<string | null>(null);
 
   // ESTADOS DE FILTRAGEM: filterPosto é o estado mestre para a segmentação de dados no Dashboard
@@ -144,6 +144,39 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
     }
   }, [filteredChecks, chartScope]);
 
+  /**
+   * REGRA DE NEGÓCIO: Estatísticas por Unidade (Posto)
+   * Agrupa as viaturas operantes por unidade para mostrar o progresso de conferência.
+   * Visível apenas para gestores (ADMIN/SUPER).
+   */
+  const unitStats = useMemo(() => {
+    if (!canFilterByPosto) return [];
+    
+    const statsMap: Record<string, { name: string, conferidas: number, pendentes: number, total: number }> = {};
+    
+    operativeViaturas.forEach(v => {
+      const posto = postos.find(p => p.id === v.postoId);
+      const postoName = posto?.name || 'S/ UNID';
+      const postoId = v.postoId || 'unknown';
+      
+      if (!statsMap[postoId]) {
+        statsMap[postoId] = { name: postoName, conferidas: 0, pendentes: 0, total: 0 };
+      }
+      
+      statsMap[postoId].total++;
+      const isChecked = checksToday.some(c => c.viaturaId === v.id);
+      if (isChecked) {
+        statsMap[postoId].conferidas++;
+      } else {
+        statsMap[postoId].pendentes++;
+      }
+    });
+    
+    return Object.values(statsMap)
+      .sort((a, b) => b.pendentes - a.pendentes || b.total - a.total)
+      .slice(0, 10); // Mostra as 10 unidades com mais pendências ou volume
+  }, [operativeViaturas, checksToday, postos, canFilterByPosto]);
+
   const activeStyle = useMemo(() => {
     const varName = currentProntidao.color === ProntidaoColor.VERDE ? '--readiness-verde' : currentProntidao.color === ProntidaoColor.AMARELA ? '--readiness-amarela' : '--readiness-azul';
     return {
@@ -249,20 +282,47 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
             </div>
           </div>
         );
+      case 'stats-unidades':
+        if (!canFilterByPosto || unitStats.length === 0) return null;
+        return (
+          <div key={id} draggable onDragStart={() => handleDragStart(id)} onDragOver={handleDragOver} onDrop={() => handleDrop(id)} className="xl:col-span-2 bg-white p-6 rounded-[2rem] shadow-lg border border-slate-100 cursor-move transition-transform active:scale-[0.98]">
+            <h3 className="text-sm font-black text-slate-800 tracking-tighter uppercase mb-4 border-b border-slate-50 pb-3">Status por Unidade (Top 10 Pendências)</h3>
+            <div className="h-60 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={unitStats} layout="vertical" margin={{ left: 40, right: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                  <XAxis type="number" hide />
+                  <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fontSize: 8, fontWeight: 'bold', fill: '#64748b'}} width={80} />
+                  <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontSize: '9px', fontWeight: 'bold' }} />
+                  <Legend verticalAlign="top" align="right" iconType="circle" wrapperStyle={{ fontSize: '8px', fontWeight: 'bold', textTransform: 'uppercase', paddingBottom: '10px' }} />
+                  <Bar dataKey="conferidas" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} name="Conferidas" barSize={12} />
+                  <Bar dataKey="pendentes" stackId="a" fill="#ef4444" radius={[0, 4, 4, 0]} name="Pendentes" barSize={12} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        );
       case 'pendencias':
+        const pendingVtrs = operativeViaturas.filter(v => !checksToday.some(c => c.viaturaId === v.id));
         return (
           <div key={id} draggable onDragStart={() => handleDragStart(id)} onDragOver={handleDragOver} onDrop={() => handleDrop(id)} className="xl:col-span-4 bg-white p-8 rounded-[2.5rem] shadow-2xl border border-slate-100 flex flex-col min-h-[300px] cursor-move transition-transform active:scale-[0.99]">
             <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100">
               <div className="flex items-center gap-4">
                   <div className="w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center text-red-500 text-2xl shadow-inner">⚠️</div>
                   <div>
-                    <h3 className="text-xl font-black text-slate-800 tracking-tighter uppercase">Pendências ({operativeViaturas.length} Ativas)</h3>
+                    <h3 className="text-xl font-black text-slate-800 tracking-tighter uppercase">Pendências ({pendingVtrs.length} de {operativeViaturas.length})</h3>
                     <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">Viaturas aguardando conferência no escopo selecionado</p>
                   </div>
               </div>
+              {pendingVtrs.length > 0 && (
+                <div className="hidden md:flex flex-col items-end">
+                  <span className="text-[10px] font-black text-red-600 uppercase tracking-widest leading-none">Atenção</span>
+                  <span className="text-[7px] font-bold text-slate-400 uppercase mt-1">Conferência Obrigatória Diária</span>
+                </div>
+              )}
             </div>
             <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
-              {operativeViaturas.filter(v => !checksToday.some(c => c.viaturaId === v.id)).length === 0 ? (
+              {pendingVtrs.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center py-10 opacity-90">
                   <div className="w-16 h-16 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center text-3xl mb-3 shadow-inner border-2 border-emerald-100">✓</div>
                   <p className="text-slate-800 font-black text-base px-6 uppercase tracking-tighter">100% de conformidade operacional.</p>
@@ -270,7 +330,7 @@ const Dashboard: React.FC<DashboardProps> = ({ viaturas, checks, postos, subs, g
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {operativeViaturas.filter(v => !checksToday.some(c => c.viaturaId === v.id)).map(v => {
+                  {pendingVtrs.map(v => {
                       const vtrChecks = filteredChecks.filter(c => c.viaturaId === v.id).sort((a,b) => b.timestamp.localeCompare(a.timestamp));
                       const lastDate = vtrChecks.length > 0 ? new Date(vtrChecks[0].timestamp) : null;
                       const diffDays = lastDate ? Math.ceil(Math.abs(new Date().getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)) : '∞';

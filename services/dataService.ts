@@ -55,17 +55,91 @@ export const DataService = {
   getConfig() { return getDbConfig(); },
   saveConfig(operationalUrl: string, auditUrl: string) { localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify({ operationalUrl, auditUrl })); },
 
+  /**
+   * HELPER: Fetch com timeout para evitar travamentos do sistema.
+   */
+  async fetchWithTimeout(resource: string, options: any = {}, timeout = 15000) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+      const response = await fetch(resource, {
+        ...options,
+        signal: controller.signal
+      });
+      clearTimeout(id);
+      return response;
+    } catch (e) {
+      clearTimeout(id);
+      throw e;
+    }
+  },
+
   async testConnection(specificUrl?: string): Promise<{ success: boolean; latency?: number; error?: string }> {
     const urlToTest = specificUrl || getDbConfig().operationalUrl;
     const start = Date.now();
     try {
-      const response = await fetch(`${urlToTest}?t=${Date.now()}`, { method: 'GET', cache: 'no-store' });
+      const response = await this.fetchWithTimeout(`${urlToTest}?t=${Date.now()}`, { method: 'GET', cache: 'no-store' }, 8000);
       if (!response.ok) return { success: false, error: `Erro HTTP ${response.status}` };
       await response.json();
       return { success: true, latency: Date.now() - start };
     } catch (e: any) {
       return { success: false, error: 'Falha ao acessar API.' };
     }
+  },
+
+  /**
+   * NORMALIZAÇÃO DE DADOS
+   * Garante que IDs sejam strings e enums estejam em caixa alta para evitar falhas de comparação.
+   */
+  normalizeData(data: any): any {
+    if (!data || typeof data !== 'object') return data;
+
+    const normalized = { ...data };
+
+    if (Array.isArray(normalized.viaturas)) {
+      normalized.viaturas = normalized.viaturas.map((v: any) => ({
+        ...v,
+        id: String(v.id || ''),
+        postoId: v.postoId ? String(v.postoId) : undefined
+      }));
+    }
+
+    if (Array.isArray(normalized.users)) {
+      normalized.users = normalized.users.map((u: any) => {
+        const level = String(u.scopeLevel || u.SCOPE_LEVEL || u.scope_level || u.nivel || 'GLOBAL').toUpperCase();
+        const id = u.scopeId || u.SCOPE_ID || u.scope_id || u.postoId || u.POSTO_ID || u.posto_id || u.unidadeId || '';
+        
+        return {
+          ...u,
+          id: String(u.id || u.ID || ''),
+          username: String(u.username || u.USUARIO || u.usuario || '').toLowerCase().trim(),
+          scopeLevel: level,
+          scopeId: id ? String(id) : undefined
+        };
+      });
+    }
+
+    if (Array.isArray(normalized.gbs)) {
+      normalized.gbs = normalized.gbs.map((g: any) => ({ ...g, id: String(g.id || '') }));
+    }
+
+    if (Array.isArray(normalized.subs)) {
+      normalized.subs = normalized.subs.map((s: any) => ({
+        ...s,
+        id: String(s.id || ''),
+        gbId: String(s.gbId || '')
+      }));
+    }
+
+    if (Array.isArray(normalized.postos)) {
+      normalized.postos = normalized.postos.map((p: any) => ({
+        ...p,
+        id: String(p.id || ''),
+        subId: String(p.subId || '')
+      }));
+    }
+
+    return normalized;
   },
 
   async fetchAllData(forceRefresh = false): Promise<any> {
@@ -77,7 +151,26 @@ export const DataService = {
     }
 
     const { operationalUrl } = getDbConfig();
-    if (!operationalUrl) return null;
+    if (!operationalUrl) {
+      console.error("[DataService] URL operacional não configurada.");
+      return null;
+    }
+
+    // Se não for forçado, tenta o cache primeiro
+    if (!forceRefresh) {
+      const cache = localStorage.getItem(STORAGE_KEY_CACHE);
+      if (cache) {
+        try {
+          const parsed = JSON.parse(cache);
+          if (parsed && typeof parsed === 'object' && (parsed.viaturas || parsed.users)) {
+            console.log("[DataService] Usando cache local válido.");
+            return this.normalizeData(parsed);
+          }
+        } catch (e) {
+          console.warn("[DataService] Cache corrompido, ignorando...");
+        }
+      }
+    }
 
     isPendingForced = forceRefresh;
     pendingFetch = (async () => {
@@ -88,22 +181,24 @@ export const DataService = {
         try {
           const separator = operationalUrl.includes('?') ? '&' : '?';
           // REGRA: Cache 'no-store' e timestamp dinâmico para garantir que o GAS não retorne cache do servidor
-          const response = await fetch(`${operationalUrl}${separator}t=${Date.now()}&force=${forceRefresh}`, { 
+          const response = await this.fetchWithTimeout(`${operationalUrl}${separator}t=${Date.now()}&force=${forceRefresh}`, { 
             method: 'GET', 
             cache: 'no-store',
             headers: { 'Accept': 'application/json' }
-          });
+          }, 20000); // Timeout de 20s para dados operacionais
           
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const data = await response.json();
+          const rawData = await response.json();
           
-          if (data && typeof data === 'object') {
+          // Validação do objeto retornado
+          if (rawData && typeof rawData === 'object' && (rawData.viaturas || rawData.users)) {
+            const data = this.normalizeData(rawData);
             console.log(`[DataService] Sincronização ${forceRefresh ? 'FORÇADA' : 'NORMAL'} concluída com sucesso.`);
             localStorage.setItem(STORAGE_KEY_CACHE, JSON.stringify(data));
             localStorage.setItem(STORAGE_KEY_LAST_SYNC, new Date().toISOString());
             return data;
           }
-          throw new Error('Dados inválidos recebidos');
+          throw new Error('Dados inválidos ou incompletos recebidos da nuvem');
         } catch (e) {
           attempts++;
           console.warn(`[DataService] Tentativa ${attempts} de fetch falhou:`, e);
@@ -111,7 +206,11 @@ export const DataService = {
           if (attempts >= maxAttempts) {
             try {
               const cache = localStorage.getItem(STORAGE_KEY_CACHE);
-              return cache ? JSON.parse(cache) : null;
+              if (cache) {
+                console.log("[DataService] Falha na rede. Usando cache de emergência.");
+                return this.normalizeData(JSON.parse(cache));
+              }
+              return null;
             } catch (parseErr) {
               return null;
             }
@@ -132,11 +231,11 @@ export const DataService = {
     try {
       const body = JSON.stringify({ type, action, ...payload });
       // REGRA: O GAS exige text/plain para requisições cross-origin simples sem preflight
-      await fetch(targetUrl, { 
+      await this.fetchWithTimeout(targetUrl, { 
         method: 'POST', 
         headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
         body 
-      });
+      }, 10000); // Timeout de 10s para envios
       console.log(`[DataService] Requisição de ${type} enviada via ${action}`);
       await new Promise(resolve => setTimeout(resolve, 300));
     } catch (e) { 
@@ -162,12 +261,12 @@ export const DataService = {
     try {
       const body = JSON.stringify({ type: 'LOG', action: 'SAVE', ...entry });
       // REGRA: Usamos POST com mode 'no-cors' para garantir o envio sem interrupções de Preflight no GAS
-      await fetch(auditUrl, { 
+      await this.fetchWithTimeout(auditUrl, { 
         method: 'POST', 
         headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
         body,
         mode: 'no-cors'
-      });
+      }, 5000); // Timeout curto para logs silenciosos
     } catch (e) {
       console.error("Erro ao persistir log operacional:", e);
     }
@@ -183,11 +282,11 @@ export const DataService = {
     
     try {
         const separator = auditUrl.includes('?') ? '&' : '?';
-        const response = await fetch(`${auditUrl}${separator}type=LOGS&t=${Date.now()}&force=${forceRefresh}`, { 
+        const response = await this.fetchWithTimeout(`${auditUrl}${separator}type=LOGS&t=${Date.now()}&force=${forceRefresh}`, { 
           method: 'GET', 
           cache: 'no-store',
           headers: { 'Accept': 'application/json' }
-        });
+        }, 12000); // Timeout de 12s para logs
         
         if (response.ok) {
             const data = await response.json();
@@ -370,7 +469,9 @@ export const DataService = {
    */
   async syncData(): Promise<any> {
     console.log("[DataService] Iniciando sincronização global forçada...");
-    localStorage.removeItem(STORAGE_KEY_CACHE);
+    // REMOVIDO: localStorage.removeItem(STORAGE_KEY_CACHE); 
+    // Motivo: Se o fetch falhar, perdemos o acesso aos dados. 
+    // fetchAllData(true) já ignora o cache para a busca.
     return await this.fetchAllData(true);
   },
 

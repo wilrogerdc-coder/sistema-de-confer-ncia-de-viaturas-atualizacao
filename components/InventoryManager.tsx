@@ -1,8 +1,10 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Viatura, MaterialItem, Posto, ViaturaStatus, User, UserRole } from '../types';
+import { Viatura, MaterialItem, Posto, ViaturaStatus, User, UserRole, InventoryCheck } from '../types';
+import { getShiftReferenceDate } from '../utils/calendarUtils';
 
 interface InventoryManagerProps {
   viaturas: Viatura[];
+  checks: InventoryCheck[];
   postos: Posto[];
   onSaveViatura: (v: Viatura) => void;
   onDeleteViatura: (id: string) => void;
@@ -20,7 +22,7 @@ interface InventoryManagerProps {
  * 4. Créditos: Desenvolvido por CAVALIERI 2026.
  * 5. Sem alça de deslize (scrollbars ocultas).
  */
-const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, postos, onSaveViatura, onDeleteViatura, currentUser }) => {
+const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, postos, onSaveViatura, onDeleteViatura, currentUser }) => {
   const [editingVtr, setEditingVtr] = useState<Viatura | null>(null);
   const [filterPosto, setFilterPosto] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -468,26 +470,38 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, postos, o
             <div className="col-span-full py-20 text-center opacity-40">
               <p className="font-black uppercase text-slate-500 tracking-widest text-xs">Nenhuma viatura localizada nesta unidade.</p>
             </div>
-          ) : filteredViaturas.map(v => (
-            <div key={v.id} className="bg-white rounded-[2rem] border-2 border-slate-100 p-5 sm:p-6 flex flex-col justify-between group hover:border-blue-500 transition-all shadow-sm gap-4 relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-8 opacity-5 text-[6rem] pointer-events-none -mr-4 -mt-4 text-blue-900">🚒</div>
-              <div className="relative z-10">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className={`w-2.5 h-2.5 rounded-full ${v.status === ViaturaStatus.OPERANDO ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-red-500'} shadow-sm`}></span>
-                  <h4 className="text-2xl font-black text-blue-950 tracking-tighter uppercase">{v.prefix}</h4>
+          ) : filteredViaturas.map(v => {
+            const todayStr = getShiftReferenceDate(new Date());
+            const checkedToday = checks.some(c => c.viaturaId === v.id && getShiftReferenceDate(c.timestamp) === todayStr);
+            
+            return (
+              <div key={v.id} className={`bg-white rounded-[2rem] border-2 p-5 sm:p-6 flex flex-col justify-between group transition-all shadow-sm gap-4 relative overflow-hidden ${checkedToday ? 'border-emerald-100 hover:border-emerald-500' : 'border-slate-100 hover:border-blue-500'}`}>
+                <div className="absolute top-0 right-0 p-8 opacity-5 text-[6rem] pointer-events-none -mr-4 -mt-4 text-blue-900">🚒</div>
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2.5 h-2.5 rounded-full ${v.status === ViaturaStatus.OPERANDO ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-red-500'} shadow-sm`}></span>
+                      <h4 className="text-2xl font-black text-blue-950 tracking-tighter uppercase">{v.prefix}</h4>
+                    </div>
+                    {checkedToday ? (
+                      <span className="text-[8px] font-black px-2 py-1 bg-emerald-500 text-white rounded-lg shadow-sm animate-in zoom-in">CONFERIDA ✓</span>
+                    ) : (
+                      <span className="text-[8px] font-black px-2 py-1 bg-red-100 text-red-600 rounded-lg border border-red-200">PENDENTE</span>
+                    )}
+                  </div>
+                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none mb-3">{postos.find(p => p.id === v.postoId)?.name || 'UNIDADE INDEFINIDA'}</p>
+                  <div className="flex items-center gap-2">
+                      <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase ${v.status === ViaturaStatus.OPERANDO ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border-red-100'}`}>{v.status}</span>
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{v.items?.length || 0} ITENS NO INVENTÁRIO</span>
+                  </div>
                 </div>
-                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none mb-3">{postos.find(p => p.id === v.postoId)?.name || 'UNIDADE INDEFINIDA'}</p>
-                <div className="flex items-center gap-2">
-                    <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase ${v.status === ViaturaStatus.OPERANDO ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border-red-100'}`}>{v.status}</span>
-                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{v.items?.length || 0} ITENS NO INVENTÁRIO</span>
+                <div className="flex gap-2 relative z-10">
+                  <button onClick={() => setEditingVtr(v)} className="flex-1 py-3 px-5 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white rounded-xl transition-all text-[10px] font-black uppercase tracking-widest border border-blue-100">Configurar Viatura</button>
+                  {isGlobalUser && <button onClick={() => window.confirm("Excluir Viatura permanentemente?") && onDeleteViatura(v.id)} className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-600 hover:text-white transition-all">🗑</button>}
                 </div>
               </div>
-              <div className="flex gap-2 relative z-10">
-                <button onClick={() => setEditingVtr(v)} className="flex-1 py-3 px-5 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white rounded-xl transition-all text-[10px] font-black uppercase tracking-widest border border-blue-100">Configurar Viatura</button>
-                {isGlobalUser && <button onClick={() => window.confirm("Excluir Viatura permanentemente?") && onDeleteViatura(v.id)} className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-600 hover:text-white transition-all">🗑</button>}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
       <p className="text-[8px] font-black text-slate-300 uppercase tracking-[0.4em] text-center mt-10">Desenvolvido por CAVALIERI 2026</p>

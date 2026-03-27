@@ -256,9 +256,10 @@ const UserAdmin: React.FC<UserAdminProps> = ({ users, gbs, subs, postos, onSaveU
                       <span className={`text-[8px] px-2 py-0.5 rounded font-black border uppercase ${u.role === UserRole.ADMIN ? 'bg-red-50 text-red-600 border-red-100' : u.role === UserRole.SUPER ? 'bg-purple-50 text-purple-600 border-purple-100' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{u.role}</span>
                       <span className={`text-[7px] font-black uppercase tracking-widest ${u.scopeLevel === 'GLOBAL' ? 'text-purple-600' : 'text-blue-500'}`}>
                          Acesso: {u.scopeLevel || 'LOCAL'} ({u.scopeLevel === 'GLOBAL' ? 'GERAL' : 
-                           u.scopeLevel === 'GB' ? gbs.find(g => g.id === u.scopeId)?.name :
-                           u.scopeLevel === 'SGB' ? subs.find(s => s.id === u.scopeId)?.name :
-                           postos.find(p => p.id === u.scopeId)?.name || 'S/V'})
+                           (u.scopeLevel === 'GB' ? gbs.find(g => g.id === u.scopeId)?.name :
+                            u.scopeLevel === 'SGB' ? subs.find(s => s.id === u.scopeId)?.name :
+                            postos.find(p => p.id === u.scopeId)?.name) || 
+                            <span className="text-red-600 font-black">⚠️ NÃO VINCULADO</span>})
                       </span>
                    </div>
                 </td>
