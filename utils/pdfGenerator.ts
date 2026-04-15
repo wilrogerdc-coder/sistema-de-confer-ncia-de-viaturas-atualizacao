@@ -115,27 +115,52 @@ export const generateInventoryPDF = (check: InventoryCheck, viatura: Viatura, is
   }
 
   const tableData: any[] = [];
-  /**
-   * SNAPSHOT DE MATERIAIS:
-   * Agrupamento por compartimento utilizando os itens salvos no momento do check.
-   */
-  const grouped = (check.snapshot || viatura.items).reduce((acc, item) => {
-    const comp = item.compartment || 'GERAL';
-    if (!acc[comp]) acc[comp] = [];
-    acc[comp].push(item);
-    return acc;
-  }, {} as Record<string, any[]>);
+  
+  const drawerOrder = viatura.drawerOrder || [];
+  const subOrderMap = viatura.subCompartmentOrder || {};
 
-  Object.entries(grouped).forEach(([comp, items]) => {
+  const grouped: Record<string, Record<string, any[]>> = {};
+  (check.snapshot || viatura.items).forEach(item => {
+    const drawer = item.compartment || 'GERAL';
+    const sub = item.subCompartment || 'GERAL';
+    if (!grouped[drawer]) grouped[drawer] = {};
+    if (!grouped[drawer][sub]) grouped[drawer][sub] = [];
+    grouped[drawer][sub].push(item);
+  });
+
+  // Use drawerOrder to maintain sequence
+  const drawersToProcess = drawerOrder.length > 0 
+    ? [...drawerOrder, ...Object.keys(grouped).filter(d => !drawerOrder.includes(d))]
+    : Object.keys(grouped);
+
+  drawersToProcess.forEach(comp => {
+    if (!grouped[comp]) return;
+    
     tableData.push([{ content: safeUpper(comp), colSpan: 4, styles: { fillColor: [240, 240, 240], fontStyle: 'bold' } }]);
-    items.forEach(item => {
-      const entry = check.entries.find(e => e.itemId === item.id);
-      tableData.push([
-        item.quantity.toString().padStart(2, '0'), 
-        `${item.name}${item.specification ? ' (' + item.specification + ')' : ''}`, 
-        { content: entry?.status || '-', styles: { halign: 'center', fontStyle: 'bold', textColor: entry?.status === 'CN' ? [200, 0, 0] : [0,0,0] } }, 
-        entry?.observation || ''
-      ]);
+    
+    const subOrder = subOrderMap[comp] || [];
+    const subsToProcess = subOrder.length > 0
+      ? [...subOrder, ...Object.keys(grouped[comp]).filter(s => !subOrder.includes(s))]
+      : Object.keys(grouped[comp]);
+
+    subsToProcess.forEach(sub => {
+      const items = grouped[comp][sub];
+      if (!items) return;
+
+      // Se não for 'GERAL', adiciona uma linha de sub-compartimento
+      if (sub !== 'GERAL') {
+        tableData.push([{ content: `   > ${safeUpper(sub)}`, colSpan: 4, styles: { fillColor: [250, 250, 250], fontStyle: 'italic', fontSize: 6 } }]);
+      }
+
+      items.sort((a, b) => (a.order || 0) - (b.order || 0)).forEach(item => {
+        const entry = check.entries.find(e => e.itemId === item.id);
+        tableData.push([
+          item.quantity.toString().padStart(2, '0'), 
+          `${item.name}${item.specification ? ' (' + item.specification + ')' : ''}`, 
+          { content: entry?.status || '-', styles: { halign: 'center', fontStyle: 'bold', textColor: entry?.status === 'CN' ? [200, 0, 0] : [0,0,0] } }, 
+          entry?.observation || ''
+        ]);
+      });
     });
   });
 
@@ -174,28 +199,54 @@ export const generateVtrDetailedMonthlyPDF = (viatura: Viatura, checks: Inventor
     doc.text(safeUpper(DEFAULT_HEADER.corpoBombeiros), 148, 12, { align: "center" });
     doc.text(`MAPA MENSAL DE CONFERÊNCIA DETALHADO: ${viatura.prefix} - ${safeUpper(postoInfo)} - ${monthYear}`, 148, 18, { align: "center" });
 
-    const grouped = viatura.items.reduce((acc, item) => {
-        const comp = item.compartment || 'GERAL';
-        if (!acc[comp]) acc[comp] = [];
-        acc[comp].push(item);
-        return acc;
-    }, {} as Record<string, any[]>);
+    const drawerOrder = viatura.drawerOrder || [];
+    const subOrderMap = viatura.subCompartmentOrder || {};
+
+    const grouped: Record<string, Record<string, any[]>> = {};
+    viatura.items.forEach(item => {
+        const drawer = item.compartment || 'GERAL';
+        const sub = item.subCompartment || 'GERAL';
+        if (!grouped[drawer]) grouped[drawer] = {};
+        if (!grouped[drawer][sub]) grouped[drawer][sub] = [];
+        grouped[drawer][sub].push(item);
+    });
 
     const body: any[] = [];
-    Object.entries(grouped).forEach(([comp, items]) => {
+    const drawersToProcess = drawerOrder.length > 0 
+        ? [...drawerOrder, ...Object.keys(grouped).filter(d => !drawerOrder.includes(d))]
+        : Object.keys(grouped);
+
+    drawersToProcess.forEach(comp => {
+        if (!grouped[comp]) return;
+        
         body.push([{ content: safeUpper(comp), colSpan: daysInMonth + 1, styles: { fillColor: [230, 230, 230], fontStyle: 'bold', halign: 'left' } }]);
-        items.forEach(item => {
-            const row: any[] = [safeUpper(item.name)];
-            for (let d = 1; d <= daysInMonth; d++) {
-                const dateStr = `${monthYear}-${d.toString().padStart(2, '0')}`;
-                
-                // REGRA: Seleciona a ÚLTIMA conferência do dia caso haja duplicidade
-                const dayChecks = checks.filter(c => c.viaturaId === viatura.id && getShiftReferenceDate(c.timestamp) === dateStr);
-                const check = dayChecks.length > 0 ? [...dayChecks].sort((a,b) => b.timestamp.localeCompare(a.timestamp))[0] : null;
-                
-                row.push(check ? (check.entries.find(e => e.itemId === item.id)?.status || '-') : '');
+        
+        const subOrder = subOrderMap[comp] || [];
+        const subsToProcess = subOrder.length > 0
+            ? [...subOrder, ...Object.keys(grouped[comp]).filter(s => !subOrder.includes(s))]
+            : Object.keys(grouped[comp]);
+
+        subsToProcess.forEach(sub => {
+            const items = grouped[comp][sub];
+            if (!items) return;
+
+            if (sub !== 'GERAL') {
+                body.push([{ content: `> ${safeUpper(sub)}`, colSpan: daysInMonth + 1, styles: { fillColor: [245, 245, 245], fontStyle: 'italic', fontSize: 4 } }]);
             }
-            body.push(row);
+
+            items.sort((a, b) => (a.order || 0) - (b.order || 0)).forEach(item => {
+                const row: any[] = [safeUpper(item.name)];
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dateStr = `${monthYear}-${d.toString().padStart(2, '0')}`;
+                    
+                    // REGRA: Seleciona a ÚLTIMA conferência do dia caso haja duplicidade
+                    const dayChecks = checks.filter(c => c.viaturaId === viatura.id && getShiftReferenceDate(c.timestamp) === dateStr);
+                    const check = dayChecks.length > 0 ? [...dayChecks].sort((a,b) => b.timestamp.localeCompare(a.timestamp))[0] : null;
+                    
+                    row.push(check ? (check.entries.find(e => e.itemId === item.id)?.status || '-') : '');
+                }
+                body.push(row);
+            });
         });
     });
 
@@ -265,22 +316,48 @@ export const generateManualDailyPDF = (viatura: Viatura, postos: Posto[]) => {
   doc.text(`CONFERENTE: ________________________________________________________`, 15, 40);
 
   const tableData: any[] = [];
-  const grouped = viatura.items.reduce((acc, item) => {
-    const comp = item.compartment || 'GERAL';
-    if (!acc[comp]) acc[comp] = [];
-    acc[comp].push(item);
-    return acc;
-  }, {} as Record<string, any[]>);
+  const drawerOrder = viatura.drawerOrder || [];
+  const subOrderMap = viatura.subCompartmentOrder || {};
 
-  Object.entries(grouped).forEach(([comp, items]) => {
+  const grouped: Record<string, Record<string, any[]>> = {};
+  viatura.items.forEach(item => {
+    const drawer = item.compartment || 'GERAL';
+    const sub = item.subCompartment || 'GERAL';
+    if (!grouped[drawer]) grouped[drawer] = {};
+    if (!grouped[drawer][sub]) grouped[drawer][sub] = [];
+    grouped[drawer][sub].push(item);
+  });
+
+  const drawersToProcess = drawerOrder.length > 0 
+    ? [...drawerOrder, ...Object.keys(grouped).filter(d => !drawerOrder.includes(d))]
+    : Object.keys(grouped);
+
+  drawersToProcess.forEach(comp => {
+    if (!grouped[comp]) return;
+    
     tableData.push([{ content: safeUpper(comp), colSpan: 4, styles: { fillColor: [240, 240, 240], fontStyle: 'bold' } }]);
-    items.forEach(item => {
-      tableData.push([
-        item.quantity.toString().padStart(2, '0'),
-        `${item.name}${item.specification ? ' (' + item.specification + ')' : ''}`,
-        '[   ]',
-        '____________________'
-      ]);
+    
+    const subOrder = subOrderMap[comp] || [];
+    const subsToProcess = subOrder.length > 0
+      ? [...subOrder, ...Object.keys(grouped[comp]).filter(s => !subOrder.includes(s))]
+      : Object.keys(grouped[comp]);
+
+    subsToProcess.forEach(sub => {
+      const items = grouped[comp][sub];
+      if (!items) return;
+
+      if (sub !== 'GERAL') {
+        tableData.push([{ content: `   > ${safeUpper(sub)}`, colSpan: 4, styles: { fillColor: [250, 250, 250], fontStyle: 'italic', fontSize: 6 } }]);
+      }
+
+      items.sort((a, b) => (a.order || 0) - (b.order || 0)).forEach(item => {
+        tableData.push([
+          item.quantity.toString().padStart(2, '0'),
+          `${item.name}${item.specification ? ' (' + item.specification + ')' : ''}`,
+          '[   ]',
+          '____________________'
+        ]);
+      });
     });
   });
 

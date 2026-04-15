@@ -64,6 +64,8 @@ export interface MaterialItem {
   specification: string;
   quantity: number;
   compartment: string;
+  subCompartment?: string;
+  order?: number;
 }
 
 export interface Viatura {
@@ -73,6 +75,8 @@ export interface Viatura {
   items: MaterialItem[];
   status: ViaturaStatus;
   postoId?: string;
+  drawerOrder?: string[];
+  subCompartmentOrder?: Record<string, string[]>; // drawer -> subCompartment[]
 }
 
 export type CheckStatus = 'S' | 'CN' | 'NA';

@@ -63,7 +63,9 @@ async function initDb() {
         prefix TEXT NOT NULL,
         items JSONB NOT NULL,
         status TEXT NOT NULL,
-        posto_id TEXT
+        posto_id TEXT,
+        drawer_order JSONB,
+        sub_compartment_order JSONB
       );
 
       CREATE TABLE IF NOT EXISTS inventory_checks (
@@ -126,7 +128,7 @@ app.get('/api/data', async (req: Request, res: Response) => {
         pool.query('SELECT id, gb_id AS "gbId", name FROM subgrupamentos'),
         pool.query('SELECT id, sub_id AS "subId", name, municipio, classification FROM postos'),
         pool.query('SELECT id, username, name, email, role, password, posto_id AS "postoId", must_change_password AS "mustChangePassword", scope_level AS "scopeLevel", scope_id AS "scopeId", custom_permissions AS "customPermissions" FROM users'),
-        pool.query('SELECT id, name, prefix, items, status, posto_id AS "postoId" FROM viaturas'),
+        pool.query('SELECT id, name, prefix, items, status, posto_id AS "postoId", drawer_order AS "drawerOrder", sub_compartment_order AS "subCompartmentOrder" FROM viaturas'),
         pool.query('SELECT id, viatura_id AS "viaturaId", date, shift_color AS "shiftColor", responsible_names AS "responsibleNames", commander_name AS "commanderName", entries, timestamp, justification, header_details AS "headerDetails", snapshot, viatura_status_at_time AS "viaturaStatusAtTime" FROM inventory_checks'),
         pool.query('SELECT id, user_id AS "userId", user_name AS "userName", action, details, timestamp FROM logs ORDER BY timestamp DESC LIMIT 1000'),
         pool.query('SELECT id, title, content, priority, active, expiration_date AS "expirationDate", created_at AS "createdAt", created_by AS "createdBy" FROM notices'),
@@ -170,7 +172,7 @@ app.post('/api/data', async (req: Request, res: Response) => {
           await pool.query('INSERT INTO users (id, username, name, email, role, password, posto_id, must_change_password, scope_level, scope_id, custom_permissions) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (id) DO UPDATE SET username = $2, name = $3, email = $4, role = $5, password = $6, posto_id = $7, must_change_password = $8, scope_level = $9, scope_id = $10, custom_permissions = $11', [payload.id, payload.username, payload.name, payload.email, payload.role, payload.password, payload.postoId, payload.mustChangePassword, payload.scopeLevel, payload.scopeId, JSON.stringify(payload.customPermissions)]);
           break;
         case 'VIATURA':
-          await pool.query('INSERT INTO viaturas (id, name, prefix, items, status, posto_id) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO UPDATE SET name = $2, prefix = $3, items = $4, status = $5, posto_id = $6', [payload.id, payload.name, payload.prefix, JSON.stringify(payload.items), payload.status, payload.postoId]);
+          await pool.query('INSERT INTO viaturas (id, name, prefix, items, status, posto_id, drawer_order, sub_compartment_order) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (id) DO UPDATE SET name = $2, prefix = $3, items = $4, status = $5, posto_id = $6, drawer_order = $7, sub_compartment_order = $8', [payload.id, payload.name, payload.prefix, JSON.stringify(payload.items), payload.status, payload.postoId, JSON.stringify(payload.drawerOrder || []), JSON.stringify(payload.subCompartmentOrder || {})]);
           break;
         case 'CHECK':
           await pool.query('INSERT INTO inventory_checks (id, viatura_id, date, shift_color, responsible_names, commander_name, entries, timestamp, justification, header_details, snapshot, viatura_status_at_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) ON CONFLICT (id) DO UPDATE SET viatura_id = $2, date = $3, shift_color = $4, responsible_names = $5, commander_name = $6, entries = $7, timestamp = $8, justification = $9, header_details = $10, snapshot = $11, viatura_status_at_time = $12', [payload.id, payload.viaturaId, payload.date, payload.shiftColor, JSON.stringify(payload.responsibleNames), payload.commanderName, JSON.stringify(payload.entries), payload.timestamp, payload.justification, JSON.stringify(payload.headerDetails), JSON.stringify(payload.snapshot), payload.viaturaStatusAtTime]);

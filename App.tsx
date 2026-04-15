@@ -287,7 +287,7 @@ const App: React.FC = () => {
           )}
         </div>
         <div className="mt-12 text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">
-          CAVALIERI - 2026 v1.3.7
+          CAVALIERI - 2026 v1.3.9
         </div>
       </div>
     );

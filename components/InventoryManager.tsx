@@ -34,12 +34,14 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, p
   
   // Estados para gestão de itens e gavetas
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  const [itemForm, setItemForm] = useState<Partial<MaterialItem>>({ name: '', specification: '', quantity: 1, compartment: '' });
+  const [itemForm, setItemForm] = useState<Partial<MaterialItem>>({ name: '', specification: '', quantity: 1, compartment: '', subCompartment: '' });
   const [compartmentOrder, setCompartmentOrder] = useState<string[]>([]);
+  const [subCompartmentOrder, setSubCompartmentOrder] = useState<Record<string, string[]>>({});
   const [draggedItem, setDraggedItem] = useState<MaterialItem | null>(null);
   
-  // Estado para nova gaveta
+  // Estado para nova gaveta e novo compartimento
   const [newGavetaName, setNewGavetaName] = useState('');
+  const [newSubCompName, setNewSubCompName] = useState<Record<string, string>>({});
 
   const isGlobalUser = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.SUPER || currentUser.scopeLevel === 'GLOBAL';
 
@@ -57,36 +59,89 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, p
   // Sincroniza ordem das gavetas quando entra em modo edição
   useEffect(() => {
     if (editingVtr) {
-      const uniqueComps = Array.from(new Set(editingVtr.items.map(i => i.compartment || 'GERAL')));
-      setCompartmentOrder(uniqueComps);
+      // REGRA: Normalização de ordens para garantir que o reordenamento funcione
+      // Se houver itens sem ordem ou com ordens duplicadas, reatribuímos sequencialmente
+      const itemsWithOrder = editingVtr.items.map((item, idx) => ({
+        ...item,
+        order: item.order !== undefined ? item.order : idx
+      }));
+
+      // Prioriza a ordem salva na viatura, se existir
+      const savedDrawerOrder = editingVtr.drawerOrder || [];
+      const uniqueComps = Array.from(new Set(itemsWithOrder.map(i => i.compartment || 'GERAL')));
+      
+      // Combina a ordem salva com novos compartimentos que possam ter surgido
+      const finalDrawerOrder = [...savedDrawerOrder];
+      uniqueComps.forEach(comp => {
+        if (!finalDrawerOrder.includes(comp)) finalDrawerOrder.push(comp);
+      });
+      setCompartmentOrder(finalDrawerOrder);
+
+      // Sincroniza sub-compartimentos
+      const savedSubOrder = editingVtr.subCompartmentOrder || {};
+      const finalSubOrder: Record<string, string[]> = { ...savedSubOrder };
+      
+      itemsWithOrder.forEach(item => {
+        const comp = item.compartment || 'GERAL';
+        const sub = item.subCompartment || 'GERAL';
+        if (!finalSubOrder[comp]) finalSubOrder[comp] = [];
+        if (!finalSubOrder[comp].includes(sub)) finalSubOrder[comp].push(sub);
+      });
+      setSubCompartmentOrder(finalSubOrder);
+
+      // Atualiza a viatura com os itens normalizados (apenas se houve mudança)
+      if (JSON.stringify(itemsWithOrder) !== JSON.stringify(editingVtr.items)) {
+        setEditingVtr({ ...editingVtr, items: itemsWithOrder });
+      }
     } else {
       setCompartmentOrder([]);
+      setSubCompartmentOrder({});
     }
   }, [editingVtr?.id]);
 
-  // REGRA DE AGRUPAMENTO: Organiza os materiais respeitando a ordem definida das gavetas (mesmo as vazias)
+  // REGRA DE AGRUPAMENTO: Organiza os materiais respeitando a hierarquia de Gavetas e Compartimentos
   const groupedItems = useMemo(() => {
     if (!editingVtr) return {};
     
-    // Inicializa o mapa com a ordem definida (preservando gavetas vazias no UI)
-    const groups = compartmentOrder.reduce((acc, comp) => {
-      acc[comp] = [];
-      return acc;
-    }, {} as Record<string, MaterialItem[]>);
+    const groups: Record<string, Record<string, MaterialItem[]>> = {};
 
-    // Aloca os itens existentes
+    // Inicializa a estrutura baseada na ordem definida
+    compartmentOrder.forEach(comp => {
+      groups[comp] = {};
+      const subs = subCompartmentOrder[comp] || [];
+      subs.forEach(sub => {
+        groups[comp][sub] = [];
+      });
+    });
+
+    // Aloca os itens existentes e garante que suas gavetas/compartimentos existam na ordem
     editingVtr.items.forEach(item => {
       const comp = item.compartment || 'GERAL';
+      const sub = item.subCompartment || 'GERAL';
+      
       if (!groups[comp]) {
-        groups[comp] = [];
-        // Se aparecer um item em gaveta não listada na ordem, adiciona ao final
-        setCompartmentOrder(prev => prev.includes(comp) ? prev : [...prev, comp]);
+        groups[comp] = {};
+        setCompartmentOrder(prev => [...prev, comp]);
       }
-      groups[comp].push(item);
+      if (!groups[comp][sub]) {
+        groups[comp][sub] = [];
+        setSubCompartmentOrder(prev => ({
+          ...prev,
+          [comp]: [...(prev[comp] || []), sub]
+        }));
+      }
+      groups[comp][sub].push(item);
+    });
+
+    // Ordena os itens dentro de cada sub-compartimento se houver campo 'order'
+    Object.keys(groups).forEach(comp => {
+      Object.keys(groups[comp]).forEach(sub => {
+        groups[comp][sub].sort((a, b) => (a.order || 0) - (b.order || 0));
+      });
     });
 
     return groups;
-  }, [editingVtr?.items, compartmentOrder]);
+  }, [editingVtr?.items, compartmentOrder, subCompartmentOrder]);
 
   /**
    * REGRA: Criação de Viatura Limpa
@@ -114,10 +169,17 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, p
     if (!editingVtr?.name || !editingVtr?.prefix) return alert("Prefixo e Nome são obrigatórios.");
     setIsSaving(true);
     try {
-      await onSaveViatura(editingVtr);
+      // Salva as ordens atuais na viatura antes de enviar
+      const vtrToSave: Viatura = {
+        ...editingVtr,
+        drawerOrder: compartmentOrder,
+        subCompartmentOrder: subCompartmentOrder
+      };
+      await onSaveViatura(vtrToSave);
       setEditingVtr(null);
       setEditingItemId(null);
       setCompartmentOrder([]);
+      setSubCompartmentOrder({});
     } finally { setIsSaving(false); }
   };
 
@@ -130,9 +192,24 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, p
     if (compartmentOrder.includes(name)) return alert("Gaveta já existente.");
     
     setCompartmentOrder(prev => [...prev, name]);
+    setSubCompartmentOrder(prev => ({ ...prev, [name]: ['GERAL'] }));
     setNewGavetaName('');
-    // Também preenche o formulário de item para facilitar a primeira adição
-    setItemForm(prev => ({ ...prev, compartment: name }));
+    setItemForm(prev => ({ ...prev, compartment: name, subCompartment: 'GERAL' }));
+  };
+
+  const handleAddSubComp = (drawerName: string) => {
+    const name = (newSubCompName[drawerName] || '').trim().toUpperCase();
+    if (!name) return alert("Informe o nome do compartimento.");
+    
+    const currentSubs = subCompartmentOrder[drawerName] || [];
+    if (currentSubs.includes(name)) return alert("Compartimento já existente nesta gaveta.");
+    
+    setSubCompartmentOrder(prev => ({
+      ...prev,
+      [drawerName]: [...currentSubs, name]
+    }));
+    setNewSubCompName(prev => ({ ...prev, [drawerName]: '' }));
+    setItemForm(prev => ({ ...prev, compartment: drawerName, subCompartment: name }));
   };
 
   const moveCompartment = (direction: 'up' | 'down', index: number) => {
@@ -144,45 +221,98 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, p
     setCompartmentOrder(newOrder);
   };
 
+  const moveSubCompartment = (drawerName: string, direction: 'up' | 'down', index: number) => {
+    const newSubs = [...(subCompartmentOrder[drawerName] || [])];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= newSubs.length) return;
+    
+    [newSubs[index], newSubs[targetIndex]] = [newSubs[targetIndex], newSubs[index]];
+    setSubCompartmentOrder(prev => ({ ...prev, [drawerName]: newSubs }));
+  };
+
+  const moveItem = (drawerName: string, subName: string, direction: 'up' | 'down', index: number) => {
+    if (!editingVtr) return;
+    const itemsInSub = [...(groupedItems[drawerName]?.[subName] || [])];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= itemsInSub.length) return;
+
+    // Troca os itens de posição no array local
+    const itemA = itemsInSub[index];
+    const itemB = itemsInSub[targetIndex];
+    
+    // Atualiza as ordens de todos os itens neste sub-compartimento para garantir integridade
+    const updatedItems = editingVtr.items.map(i => {
+      if (i.id === itemA.id) return { ...i, order: targetIndex };
+      if (i.id === itemB.id) return { ...i, order: index };
+      
+      // Garante que outros itens no mesmo sub-compartimento tenham ordens coerentes
+      if (i.compartment === drawerName && (i.subCompartment || 'GERAL') === subName) {
+        const currentIdx = itemsInSub.findIndex(item => item.id === i.id);
+        if (currentIdx !== -1 && currentIdx !== index && currentIdx !== targetIndex) {
+          return { ...i, order: currentIdx };
+        }
+      }
+      return i;
+    });
+
+    setEditingVtr({ ...editingVtr, items: updatedItems });
+  };
+
   const handleAddItem = () => {
-    if (!itemForm.name || !itemForm.compartment) return alert("Nome e Compartimento são obrigatórios.");
+    if (!itemForm.name || !itemForm.compartment) return alert("Nome e Gaveta são obrigatórios.");
     if (!editingVtr) return;
     
+    const drawerItems = editingVtr.items.filter(i => i.compartment === itemForm.compartment && (i.subCompartment || 'GERAL') === (itemForm.subCompartment || 'GERAL'));
+    const maxOrder = drawerItems.length > 0 ? Math.max(...drawerItems.map(i => i.order || 0)) : 0;
+
     const newItem: MaterialItem = {
       id: Math.random().toString(36).substr(2, 9),
       name: itemForm.name,
       specification: itemForm.specification || '',
       quantity: Number(itemForm.quantity) || 1,
-      compartment: itemForm.compartment.toUpperCase()
+      compartment: itemForm.compartment.toUpperCase(),
+      subCompartment: (itemForm.subCompartment || 'GERAL').toUpperCase(),
+      order: maxOrder + 1
     };
     
     setEditingVtr({
       ...editingVtr,
       items: [...editingVtr.items, newItem]
     });
-    setItemForm({ name: '', specification: '', quantity: 1, compartment: itemForm.compartment });
+    setItemForm({ name: '', specification: '', quantity: 1, compartment: itemForm.compartment, subCompartment: itemForm.subCompartment });
   };
 
-  const handleMoveItem = (itemId: string, newComp: string) => {
+  const handleMoveItem = (itemId: string, newComp: string, newSub?: string) => {
     if (!editingVtr) return;
     const updatedItems = editingVtr.items.map(i => 
-        i.id === itemId ? { ...i, compartment: newComp.toUpperCase() } : i
+        i.id === itemId ? { ...i, compartment: newComp.toUpperCase(), subCompartment: (newSub || 'GERAL').toUpperCase() } : i
     );
     setEditingVtr({ ...editingVtr, items: updatedItems });
-    // Se a gaveta de destino não existir na ordem (ex: via select), adiciona
+    
     if (!compartmentOrder.includes(newComp.toUpperCase())) {
         setCompartmentOrder(prev => [...prev, newComp.toUpperCase()]);
+    }
+    if (newSub && !(subCompartmentOrder[newComp.toUpperCase()] || []).includes(newSub.toUpperCase())) {
+        setSubCompartmentOrder(prev => ({
+          ...prev,
+          [newComp.toUpperCase()]: [...(prev[newComp.toUpperCase()] || []), newSub.toUpperCase()]
+        }));
     }
   };
 
   const handleUpdateItem = () => {
     if (!editingVtr || !editingItemId) return;
     const updatedItems = editingVtr.items.map(i => 
-      i.id === editingItemId ? { ...i, ...itemForm, compartment: itemForm.compartment?.toUpperCase() || 'GERAL' } as MaterialItem : i
+      i.id === editingItemId ? { 
+        ...i, 
+        ...itemForm, 
+        compartment: itemForm.compartment?.toUpperCase() || 'GERAL',
+        subCompartment: itemForm.subCompartment?.toUpperCase() || 'GERAL'
+      } as MaterialItem : i
     );
     setEditingVtr({ ...editingVtr, items: updatedItems });
     setEditingItemId(null);
-    setItemForm({ name: '', specification: '', quantity: 1, compartment: '' });
+    setItemForm({ name: '', specification: '', quantity: 1, compartment: '', subCompartment: '' });
   };
 
   const handleRemoveItem = (id: string) => {
@@ -194,17 +324,17 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, p
   };
 
   const onDragStart = (item: MaterialItem) => setDraggedItem(item);
-  const onDropItem = (compName: string) => {
-    if (draggedItem && draggedItem.compartment !== compName) {
-        handleMoveItem(draggedItem.id, compName);
+  const onDropItem = (compName: string, subName?: string) => {
+    if (draggedItem && (draggedItem.compartment !== compName || (draggedItem.subCompartment || 'GERAL') !== (subName || 'GERAL'))) {
+        handleMoveItem(draggedItem.id, compName, subName);
     }
     setDraggedItem(null);
   };
 
   const handleExportCSV = () => {
     if (!editingVtr || editingVtr.items.length === 0) return alert("Não há itens para exportar.");
-    const headers = "Nome,Especificacao,Quantidade,Compartimento\n";
-    const rows = editingVtr.items.map(i => `"${i.name}","${i.specification}",${i.quantity},"${i.compartment}"`).join("\n");
+    const headers = "Nome,Especificacao,Quantidade,Gaveta,Compartimento\n";
+    const rows = editingVtr.items.map(i => `"${i.name}","${i.specification}",${i.quantity},"${i.compartment}","${i.subCompartment || 'GERAL'}"`).join("\n");
     const blob = new Blob([headers + rows], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
@@ -233,7 +363,9 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, p
               name: parts[0].replace(/"/g, ''),
               specification: parts[1].replace(/"/g, ''),
               quantity: parseInt(parts[2]) || 1,
-              compartment: parts[3].replace(/"/g, '').toUpperCase()
+              compartment: parts[3].replace(/"/g, '').toUpperCase(),
+              subCompartment: (parts[4] || 'GERAL').replace(/"/g, '').toUpperCase(),
+              order: i
             });
           }
         }
@@ -350,30 +482,37 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, p
             {/* FORMULÁRIO DE ITEM */}
             <div className="bg-white/5 p-5 rounded-2xl mb-8 border border-white/10">
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 mb-4">
-                    <div className="sm:col-span-4">
+                    <div className="sm:col-span-3">
                         <label className="text-[9px] font-bold text-blue-300 uppercase ml-1">Material</label>
                         <input type="text" placeholder="Nome do Material" value={itemForm.name} onChange={e => setItemForm({...itemForm, name: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-blue-950/30 border border-blue-800 text-xs font-bold outline-none text-white focus:border-blue-400 transition-all" />
                     </div>
-                    <div className="sm:col-span-4">
+                    <div className="sm:col-span-3">
                         <label className="text-[9px] font-bold text-blue-300 uppercase ml-1">Especificação</label>
                         <input type="text" placeholder="Especificação técnica" value={itemForm.specification} onChange={e => setItemForm({...itemForm, specification: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-blue-950/30 border border-blue-800 text-xs font-bold outline-none text-white focus:border-blue-400 transition-all" />
                     </div>
-                    <div className="sm:col-span-2">
-                        <label className="text-[9px] font-bold text-blue-300 uppercase ml-1">Quantidade</label>
+                    <div className="sm:col-span-1">
+                        <label className="text-[9px] font-bold text-blue-300 uppercase ml-1">Qt</label>
                         <input type="number" placeholder="Qt" value={itemForm.quantity} onChange={e => setItemForm({...itemForm, quantity: parseInt(e.target.value) || 1})} className="w-full px-4 py-3 rounded-xl bg-blue-950/30 border border-blue-800 text-xs font-bold outline-none text-white focus:border-blue-400 transition-all" />
                     </div>
                     <div className="sm:col-span-2">
-                        <label className="text-[9px] font-bold text-blue-300 uppercase ml-1">Vincular à Gaveta</label>
-                        <select value={itemForm.compartment} onChange={e => setItemForm({...itemForm, compartment: e.target.value.toUpperCase()})} className="w-full px-4 py-3 rounded-xl bg-blue-950/30 border border-blue-800 text-xs font-bold outline-none text-white focus:border-blue-400 transition-all">
+                        <label className="text-[9px] font-bold text-blue-300 uppercase ml-1">Gaveta</label>
+                        <select value={itemForm.compartment} onChange={e => setItemForm({...itemForm, compartment: e.target.value.toUpperCase(), subCompartment: 'GERAL'})} className="w-full px-4 py-3 rounded-xl bg-blue-950/30 border border-blue-800 text-xs font-bold outline-none text-white focus:border-blue-400 transition-all">
                             <option value="">Selecione...</option>
                             {compartmentOrder.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                    </div>
+                    <div className="sm:col-span-3">
+                        <label className="text-[9px] font-bold text-blue-300 uppercase ml-1">Compartimento</label>
+                        <select value={itemForm.subCompartment} onChange={e => setItemForm({...itemForm, subCompartment: e.target.value.toUpperCase()})} className="w-full px-4 py-3 rounded-xl bg-blue-950/30 border border-blue-800 text-xs font-bold outline-none text-white focus:border-blue-400 transition-all">
+                            <option value="">Selecione...</option>
+                            {(subCompartmentOrder[itemForm.compartment || ''] || []).map(s => <option key={s} value={s}>{s}</option>)}
                         </select>
                     </div>
                 </div>
                 <div className="flex justify-end gap-3">
                     {editingItemId ? (
                         <>
-                            <button onClick={() => { setEditingItemId(null); setItemForm({ name: '', specification: '', quantity: 1, compartment: '' }); }} className="px-6 py-2.5 bg-slate-600 rounded-xl font-black text-[10px] uppercase hover:bg-slate-500 transition-all">Cancelar</button>
+                            <button onClick={() => { setEditingItemId(null); setItemForm({ name: '', specification: '', quantity: 1, compartment: '', subCompartment: '' }); }} className="px-6 py-2.5 bg-slate-600 rounded-xl font-black text-[10px] uppercase hover:bg-slate-500 transition-all">Cancelar</button>
                             <button onClick={handleUpdateItem} className="px-8 py-2.5 bg-blue-500 rounded-xl font-black text-[10px] uppercase hover:bg-blue-400 transition-all shadow-lg">Confirmar Alteração</button>
                         </>
                     ) : (
@@ -383,7 +522,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, p
             </div>
 
             {/* LISTA AGRUPADA COM REORDENAÇÃO E SUPORTE A GAVETAS VAZIAS */}
-            <div className="space-y-6 max-h-[600px] overflow-y-auto no-scrollbar pr-1">
+            <div className="space-y-8 max-h-[700px] overflow-y-auto no-scrollbar pr-1">
                 {compartmentOrder.length === 0 ? (
                     <div className="py-12 text-center border-2 border-dashed border-white/10 rounded-3xl">
                         <p className="text-blue-300/50 font-black uppercase text-xs tracking-widest">Aguardando registro de materiais ou gavetas.</p>
@@ -391,60 +530,105 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, p
                 ) : compartmentOrder.map((compName, idx) => (
                     <div 
                         key={compName} 
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={() => onDropItem(compName)}
-                        className={`space-y-3 p-4 rounded-3xl transition-all ${draggedItem && draggedItem.compartment !== compName ? 'bg-white/5 border border-dashed border-blue-400/30 ring-2 ring-blue-500/10 scale-[0.99]' : 'bg-transparent'}`}
+                        className="bg-white/5 border border-white/10 p-6 rounded-[2.5rem] space-y-4"
                     >
-                        <div className="flex items-center justify-between gap-4">
-                            <div className="flex items-center gap-2">
-                                <h5 className="font-black text-[11px] text-blue-300 uppercase tracking-[0.3em] bg-blue-950 px-3 py-1 rounded-lg border border-blue-800">{compName}</h5>
-                                <span className="text-[8px] font-bold text-blue-400 opacity-50">({groupedItems[compName]?.length || 0} ITENS)</span>
+                        <div className="flex items-center justify-between gap-4 border-b border-white/5 pb-4">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-lg shadow-lg">📦</div>
+                                <div>
+                                    <h5 className="font-black text-sm text-white uppercase tracking-tighter leading-none">{compName}</h5>
+                                    <span className="text-[8px] font-bold text-blue-400 uppercase tracking-widest">Gaveta Operacional</span>
+                                </div>
                             </div>
-                            <div className="flex gap-1">
-                                <button onClick={() => moveCompartment('up', idx)} disabled={idx === 0} className="p-1.5 bg-white/5 rounded-lg hover:bg-white/10 disabled:opacity-20 transition-all text-[10px]">▲</button>
-                                <button onClick={() => moveCompartment('down', idx)} disabled={idx === compartmentOrder.length - 1} className="p-1.5 bg-white/5 rounded-lg hover:bg-white/10 disabled:opacity-20 transition-all text-[10px]">▼</button>
-                                <button onClick={() => { if(confirm("Remover esta gaveta?")) setCompartmentOrder(prev => prev.filter(c => c !== compName)) }} className="p-1.5 bg-white/5 text-red-400 rounded-lg hover:bg-red-500 hover:text-white transition-all text-[10px]">🗑</button>
+                            <div className="flex items-center gap-4">
+                                <div className="flex bg-blue-950/50 p-1 rounded-xl border border-white/5">
+                                    <input type="text" placeholder="NOVO COMPARTIMENTO" value={newSubCompName[compName] || ''} onChange={e => setNewSubCompName({...newSubCompName, [compName]: e.target.value})} className="bg-transparent px-3 py-1 text-[9px] font-bold uppercase outline-none text-white w-32" />
+                                    <button onClick={() => handleAddSubComp(compName)} className="bg-blue-600 px-3 py-1 rounded-lg text-[8px] font-black uppercase hover:bg-blue-500 transition-all">ADD</button>
+                                </div>
+                                <div className="flex gap-1 border-l border-white/10 pl-4">
+                                    <button onClick={() => moveCompartment('up', idx)} disabled={idx === 0} className="p-2 bg-white/5 rounded-lg hover:bg-white/10 disabled:opacity-20 transition-all text-xs">▲</button>
+                                    <button onClick={() => moveCompartment('down', idx)} disabled={idx === compartmentOrder.length - 1} className="p-2 bg-white/5 rounded-lg hover:bg-white/10 disabled:opacity-20 transition-all text-xs">▼</button>
+                                    <button onClick={() => { if(confirm(`Remover Gaveta ${compName}?`)) setCompartmentOrder(prev => prev.filter(c => c !== compName)) }} className="p-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500 hover:text-white transition-all text-xs">🗑</button>
+                                </div>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-2">
-                            {groupedItems[compName]?.length === 0 && (
-                                <div className="p-4 border border-dashed border-white/5 rounded-2xl text-center">
-                                    <p className="text-[8px] font-black uppercase text-white/20">Gaveta Vazia</p>
-                                </div>
-                            )}
-                            {(groupedItems[compName] || []).map(item => (
+                        <div className="grid grid-cols-1 gap-6">
+                            {(subCompartmentOrder[compName] || []).map((subName, sIdx) => (
                                 <div 
-                                    key={item.id} 
-                                    draggable
-                                    onDragStart={() => onDragStart(item)}
-                                    className={`p-4 rounded-2xl border transition-all flex flex-col sm:flex-row justify-between items-center group cursor-move ${editingItemId === item.id ? 'bg-blue-600 border-white shadow-xl' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
+                                    key={subName}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={() => onDropItem(compName, subName)}
+                                    className={`p-4 rounded-3xl border transition-all ${draggedItem && (draggedItem.compartment !== compName || (draggedItem.subCompartment || 'GERAL') !== subName) ? 'bg-blue-500/10 border-dashed border-blue-400 ring-2 ring-blue-500/10' : 'bg-blue-950/20 border-white/5'}`}
                                 >
-                                    <div className="flex-1 w-full sm:w-auto">
+                                    <div className="flex items-center justify-between mb-4">
                                         <div className="flex items-center gap-2">
-                                            <span className="w-8 h-8 flex items-center justify-center bg-blue-950/50 rounded-lg text-[10px] font-black border border-white/10">{item.quantity}</span>
-                                            <p className="text-xs font-black uppercase tracking-tight">{item.name}</p>
+                                            <span className="text-[9px] font-black text-blue-300 uppercase tracking-widest bg-blue-900/50 px-3 py-1 rounded-lg">{subName}</span>
+                                            <span className="text-[8px] font-bold text-white/20">({(groupedItems[compName]?.[subName] || []).length} ITENS)</span>
                                         </div>
-                                        {item.specification && (
-                                            <p className="text-[10px] text-white/40 font-bold mt-1 ml-10 italic">{item.specification}</p>
-                                        )}
+                                        <div className="flex gap-1">
+                                            <button onClick={() => moveSubCompartment(compName, 'up', sIdx)} disabled={sIdx === 0} className="p-1.5 bg-white/5 rounded-lg hover:bg-white/10 disabled:opacity-20 transition-all text-[10px]">▲</button>
+                                            <button onClick={() => moveSubCompartment(compName, 'down', sIdx)} disabled={sIdx === (subCompartmentOrder[compName]?.length || 0) - 1} className="p-1.5 bg-white/5 rounded-lg hover:bg-white/10 disabled:opacity-20 transition-all text-[10px]">▼</button>
+                                            {subName !== 'GERAL' && (
+                                                <button onClick={() => { if(confirm(`Remover Compartimento ${subName}?`)) setSubCompartmentOrder(prev => ({ ...prev, [compName]: prev[compName].filter(s => s !== subName) })) }} className="p-1.5 bg-white/5 text-red-400 rounded-lg hover:bg-red-500 hover:text-white transition-all text-[10px]">🗑</button>
+                                            )}
+                                        </div>
                                     </div>
-                                    
-                                    <div className="flex items-center gap-3 w-full sm:w-auto mt-3 sm:mt-0 pt-3 sm:pt-0 border-t sm:border-none border-white/5">
-                                        <div className="flex flex-col items-end">
-                                            <label className="text-[8px] font-black text-blue-300 uppercase opacity-40 mb-1">Mover Gaveta</label>
-                                            <select 
-                                                value={item.compartment} 
-                                                onChange={(e) => handleMoveItem(item.id, e.target.value)}
-                                                className="bg-blue-950/50 border border-white/10 rounded-lg px-2 py-1 text-[9px] font-black uppercase outline-none focus:border-blue-400 transition-all"
+
+                                    <div className="space-y-2">
+                                        {(groupedItems[compName]?.[subName] || []).length === 0 && (
+                                            <div className="py-4 text-center border border-dashed border-white/5 rounded-2xl">
+                                                <p className="text-[8px] font-black uppercase text-white/10">Vazio</p>
+                                            </div>
+                                        )}
+                                        {(groupedItems[compName]?.[subName] || []).map((item, iIdx) => (
+                                            <div 
+                                                key={item.id} 
+                                                draggable
+                                                onDragStart={() => onDragStart(item)}
+                                                className={`p-3 rounded-2xl border transition-all flex flex-col sm:flex-row justify-between items-center group cursor-move ${editingItemId === item.id ? 'bg-blue-600 border-white shadow-xl' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
                                             >
-                                                {compartmentOrder.map(c => <option key={c} value={c}>{c}</option>)}
-                                            </select>
-                                        </div>
-                                        <div className="flex gap-1 ml-2">
-                                            <button onClick={() => { setEditingItemId(item.id); setItemForm(item); }} className="p-2 bg-blue-500/20 text-blue-300 hover:bg-blue-500 hover:text-white rounded-xl transition-all text-[9px] font-black uppercase">Edição</button>
-                                            <button onClick={() => handleRemoveItem(item.id)} className="p-2 bg-red-500/20 text-red-300 hover:bg-red-500 hover:text-white rounded-xl transition-all text-[9px] font-black">✕</button>
-                                        </div>
+                                                <div className="flex-1 flex items-center gap-3">
+                                                    <div className="flex flex-col gap-1">
+                                                        <button onClick={() => moveItem(compName, subName, 'up', iIdx)} disabled={iIdx === 0} className="text-[8px] opacity-20 hover:opacity-100 disabled:opacity-0">▲</button>
+                                                        <span className="w-7 h-7 flex items-center justify-center bg-blue-950/50 rounded-lg text-[9px] font-black border border-white/10">{item.quantity}</span>
+                                                        <button onClick={() => moveItem(compName, subName, 'down', iIdx)} disabled={iIdx === (groupedItems[compName]?.[subName]?.length || 0) - 1} className="text-[8px] opacity-20 hover:opacity-100 disabled:opacity-0">▼</button>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs font-black uppercase tracking-tight">{item.name}</p>
+                                                        {item.specification && (
+                                                            <p className="text-[9px] text-white/40 font-bold italic">{item.specification}</p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="flex items-center gap-3 mt-3 sm:mt-0">
+                                                    <div className="flex flex-col items-end">
+                                                        <label className="text-[7px] font-black text-blue-300 uppercase opacity-30 mb-1">Mover Para</label>
+                                                        <div className="flex gap-1">
+                                                            <select 
+                                                                value={item.compartment} 
+                                                                onChange={(e) => handleMoveItem(item.id, e.target.value, 'GERAL')}
+                                                                className="bg-blue-950/50 border border-white/10 rounded-lg px-2 py-1 text-[8px] font-black uppercase outline-none focus:border-blue-400 transition-all w-20"
+                                                            >
+                                                                {compartmentOrder.map(c => <option key={c} value={c}>{c}</option>)}
+                                                            </select>
+                                                            <select 
+                                                                value={item.subCompartment || 'GERAL'} 
+                                                                onChange={(e) => handleMoveItem(item.id, item.compartment, e.target.value)}
+                                                                className="bg-blue-950/50 border border-white/10 rounded-lg px-2 py-1 text-[8px] font-black uppercase outline-none focus:border-blue-400 transition-all w-20"
+                                                            >
+                                                                {(subCompartmentOrder[item.compartment] || []).map(s => <option key={s} value={s}>{s}</option>)}
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex gap-1 ml-2">
+                                                        <button onClick={() => { setEditingItemId(item.id); setItemForm(item); }} className="p-2 bg-blue-500/20 text-blue-300 hover:bg-blue-500 hover:text-white rounded-xl transition-all text-[8px] font-black uppercase">EDIT</button>
+                                                        <button onClick={() => handleRemoveItem(item.id)} className="p-2 bg-red-500/20 text-red-300 hover:bg-red-500 hover:text-white rounded-xl transition-all text-[8px] font-black">✕</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             ))}
@@ -455,7 +639,7 @@ const InventoryManager: React.FC<InventoryManagerProps> = ({ viaturas, checks, p
           </div>
 
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-6 border-t border-white/10">
-            <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.3em]">Desenvolvido por CAVALIERI 2026 {APP_VERSION}</p>
+            <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.3em]">Desenvolvido por CAVALIERI 2026 v1.3.9</p>
             <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
               <button onClick={handleUpdateVtr} disabled={isSaving} className="w-full sm:w-auto bg-emerald-600 px-10 py-4 rounded-xl font-black uppercase text-xs shadow-lg transition-all hover:brightness-110">{isSaving ? 'Gravando...' : 'Finalizar Configuração'}</button>
               <button onClick={() => { setEditingVtr(null); setCompartmentOrder([]); }} className="w-full sm:w-auto bg-slate-700 px-10 py-4 rounded-xl font-black uppercase text-xs">Descartar</button>

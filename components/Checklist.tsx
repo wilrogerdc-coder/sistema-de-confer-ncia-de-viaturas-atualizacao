@@ -47,24 +47,50 @@ const Checklist: React.FC<ChecklistProps> = ({ viaturas, checks, onComplete, onF
   const prontidao = getProntidaoInfo(date); 
   
   const groupedItems = useMemo(() => {
-    if (!selectedVtr) return {} as Record<string, MaterialItem[]>;
-    return selectedVtr.items.reduce((acc, item) => {
-      const comp = item.compartment || 'GERAL';
-      if (!acc[comp]) acc[comp] = [];
-      acc[comp].push(item);
-      return acc;
-    }, {} as Record<string, MaterialItem[]>);
+    if (!selectedVtr) return {} as Record<string, Record<string, MaterialItem[]>>;
+    
+    const drawerOrder = selectedVtr.drawerOrder || [];
+    const subOrder = selectedVtr.subCompartmentOrder || {};
+    
+    const groups: Record<string, Record<string, MaterialItem[]>> = {};
+
+    // Inicializa estrutura baseada na ordem salva
+    drawerOrder.forEach(drawer => {
+      groups[drawer] = {};
+      (subOrder[drawer] || []).forEach(sub => {
+        groups[drawer][sub] = [];
+      });
+    });
+
+    // Aloca itens
+    selectedVtr.items.forEach(item => {
+      const drawer = item.compartment || 'GERAL';
+      const sub = item.subCompartment || 'GERAL';
+      
+      if (!groups[drawer]) groups[drawer] = {};
+      if (!groups[drawer][sub]) groups[drawer][sub] = [];
+      
+      groups[drawer][sub].push(item);
+    });
+
+    // Ordena itens dentro de cada sub-compartimento
+    Object.keys(groups).forEach(drawer => {
+      Object.keys(groups[drawer]).forEach(sub => {
+        groups[drawer][sub].sort((a, b) => (a.order || 0) - (b.order || 0));
+      });
+    });
+
+    return groups;
   }, [selectedVtr]);
 
   const progressPercent = selectedVtr?.items.length ? Math.round((Object.keys(entries).length / selectedVtr.items.length) * 100) : 0;
   
-  // REGRA: Identificação de compartimentos pendentes (gavetas faltando preencher)
+  // REGRA: Identificação de gavetas pendentes
   const pendingCompartments = useMemo(() => {
     if (!selectedVtr || !groupedItems) return [];
-    // Adicionado cast explícito para evitar erro 'Property some does not exist on type unknown'
-    return (Object.entries(groupedItems) as [string, MaterialItem[]][])
-      .filter(([comp, items]) => items.some(item => !entries[item.id]))
-      .map(([comp]) => comp);
+    return Object.entries(groupedItems).filter(([drawer, subs]) => {
+      return Object.values(subs).some(items => items.some(item => !entries[item.id]));
+    }).map(([drawer]) => drawer);
   }, [groupedItems, entries, selectedVtr]);
 
   const isJustificationRequired = date !== getTodayLocal() || checks.some(c => c.viaturaId === selectedVtrId && getShiftReferenceDate(c.timestamp) === date);
@@ -238,40 +264,49 @@ const Checklist: React.FC<ChecklistProps> = ({ viaturas, checks, onComplete, onF
         </div>
 
         <form onSubmit={handleSubmit} className="px-5 space-y-6">
-            {(Object.entries(groupedItems) as [string, MaterialItem[]][]).map(([comp, items]) => (
-                <div key={comp} className={`bg-white rounded-[2.5rem] border-2 transition-all ${openCompartments[comp] ? 'border-blue-500 shadow-2xl' : 'border-slate-100 shadow-sm'}`}>
-                    <button type="button" onClick={() => setOpenCompartments(p => ({...p, [comp]: !p[comp]}))} className={`w-full p-8 flex justify-between items-center transition-all ${openCompartments[comp] ? 'bg-blue-600 text-white rounded-t-[2.3rem]' : 'bg-white rounded-[2.3rem]'}`}>
+            {Object.entries(groupedItems).map(([drawer, subs]) => (
+                <div key={drawer} className={`bg-white rounded-[2.5rem] border-2 transition-all ${openCompartments[drawer] ? 'border-blue-500 shadow-2xl' : 'border-slate-100 shadow-sm'}`}>
+                    <button type="button" onClick={() => setOpenCompartments(p => ({...p, [drawer]: !p[drawer]}))} className={`w-full p-8 flex justify-between items-center transition-all ${openCompartments[drawer] ? 'bg-blue-600 text-white rounded-t-[2.3rem]' : 'bg-white rounded-[2.3rem]'}`}>
                         <div className="flex items-center gap-3">
-                            <span className="font-black text-base uppercase tracking-widest">{comp}</span>
-                            {/* REGRA: Indicador visual se a gaveta está pendente */}
-                            {pendingCompartments.includes(comp) && <span className="w-2 h-2 rounded-full bg-red-400 animate-ping"></span>}
+                            <span className="font-black text-base uppercase tracking-widest">{drawer}</span>
+                            {pendingCompartments.includes(drawer) && <span className="w-2 h-2 rounded-full bg-red-400 animate-ping"></span>}
                         </div>
-                        <span className="text-3xl transition-transform" style={{ transform: openCompartments[comp] ? 'rotate(90deg)' : 'rotate(0)' }}>▸</span>
+                        <span className="text-3xl transition-transform" style={{ transform: openCompartments[drawer] ? 'rotate(90deg)' : 'rotate(0)' }}>▸</span>
                     </button>
-                    {openCompartments[comp] && (
-                        <div className="p-6 space-y-6 bg-slate-50/50">
-                            {(items as MaterialItem[]).map(item => (
-                                <div key={item.id} className="p-6 rounded-[2rem] border border-slate-200 bg-white shadow-sm">
-                                    <div className="flex justify-between items-start mb-6">
-                                        <div className="flex-1">
-                                            <span className="font-black text-slate-800 text-xl block leading-tight uppercase tracking-tighter">{item.name}</span>
-                                            {item.specification && <span className="text-xs font-bold text-slate-400 uppercase tracking-tight">{item.specification}</span>}
-                                        </div>
-                                        <span className="text-xs bg-slate-100 text-slate-800 px-4 py-2 rounded-xl font-black border border-slate-200 shadow-inner ml-4">QT: {item.quantity}</span>
+                    {openCompartments[drawer] && (
+                        <div className="p-4 space-y-6 bg-slate-50/50">
+                            {Object.entries(subs).map(([subName, items]) => (
+                                <div key={subName} className="space-y-4">
+                                    <div className="flex items-center gap-2 px-4">
+                                        <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest bg-blue-50 px-3 py-1 rounded-lg border border-blue-100">{subName}</span>
+                                        <div className="h-[1px] flex-1 bg-slate-200"></div>
                                     </div>
-                                    <div className="flex gap-3">
-                                        {['S', 'CN', 'NA'].map(s => {
-                                          const isSelected = entries[item.id]?.status === s;
-                                          return (
-                                            <button key={s} type="button" onClick={() => setEntries(prev => ({ ...prev, [item.id]: { itemId: item.id, status: s as any }}))} className={`flex-1 h-16 rounded-2xl font-black text-base border-2 transition-all active:scale-95 ${isSelected ? (s === 'S' ? 'bg-emerald-500 border-emerald-500 text-white shadow-emerald-200' : s === 'CN' ? 'bg-red-500 border-red-500 text-white shadow-red-200' : 'bg-amber-500 border-amber-500 text-white shadow-amber-200') : 'bg-white border-slate-100 text-slate-300 hover:border-slate-300'} shadow-lg`}>
-                                              {s}
-                                            </button>
-                                          );
-                                        })}
+                                    <div className="space-y-4">
+                                        {items.map(item => (
+                                            <div key={item.id} className="p-6 rounded-[2rem] border border-slate-200 bg-white shadow-sm">
+                                                <div className="flex justify-between items-start mb-6">
+                                                    <div className="flex-1">
+                                                        <span className="font-black text-slate-800 text-xl block leading-tight uppercase tracking-tighter">{item.name}</span>
+                                                        {item.specification && <span className="text-xs font-bold text-slate-400 uppercase tracking-tight">{item.specification}</span>}
+                                                    </div>
+                                                    <span className="text-xs bg-slate-100 text-slate-800 px-4 py-2 rounded-xl font-black border border-slate-200 shadow-inner ml-4">QT: {item.quantity}</span>
+                                                </div>
+                                                <div className="flex gap-3">
+                                                    {['S', 'CN', 'NA'].map(s => {
+                                                      const isSelected = entries[item.id]?.status === s;
+                                                      return (
+                                                        <button key={s} type="button" onClick={() => setEntries(prev => ({ ...prev, [item.id]: { itemId: item.id, status: s as any }}))} className={`flex-1 h-16 rounded-2xl font-black text-base border-2 transition-all active:scale-95 ${isSelected ? (s === 'S' ? 'bg-emerald-500 border-emerald-500 text-white shadow-emerald-200' : s === 'CN' ? 'bg-red-500 border-red-500 text-white shadow-red-200' : 'bg-amber-500 border-amber-500 text-white shadow-amber-200') : 'bg-white border-slate-100 text-slate-300 hover:border-slate-300'} shadow-lg`}>
+                                                          {s}
+                                                        </button>
+                                                      );
+                                                    })}
+                                                </div>
+                                                {entries[item.id]?.status === 'CN' && (
+                                                    <textarea onChange={e => setEntries(prev => ({...prev, [item.id]: {...prev[item.id], observation: e.target.value}}))} className="w-full mt-6 p-5 border-2 border-red-100 rounded-3xl text-sm font-bold focus:border-red-500 outline-none bg-red-50/30" placeholder="Relate o defeito ou falta (Obrigatório)..." required value={entries[item.id]?.observation || ''} />
+                                                )}
+                                            </div>
+                                        ))}
                                     </div>
-                                    {entries[item.id]?.status === 'CN' && (
-                                        <textarea onChange={e => setEntries(prev => ({...prev, [item.id]: {...prev[item.id], observation: e.target.value}}))} className="w-full mt-6 p-5 border-2 border-red-100 rounded-3xl text-sm font-bold focus:border-red-500 outline-none bg-red-50/30" placeholder="Relate o defeito ou falta (Obrigatório)..." required value={entries[item.id]?.observation || ''} />
-                                    )}
                                 </div>
                             ))}
                         </div>
